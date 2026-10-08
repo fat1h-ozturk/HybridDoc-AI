@@ -1,0 +1,40 @@
+# Python & Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment Variables & Secrets
+.env
+.env.local
+.env.*
+!.env.example
+
+# Vector DBs & Local Data
+*.chroma/
+chroma_db/
+qdrant_storage/
+data/storage/
+
+# Node.js & Frontend
+node_modules/
+apps/web/.next/
+apps/web/out/
+apps/web/build/
+.npm
+npm-debug.log*
+
+# IDE & OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
