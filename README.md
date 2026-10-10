@@ -66,3 +66,17 @@ RAG-OCR-proje/
    ```bash
    cp .env.example .env
    ```
+
+## Sayfa Kaynaklı Metin Parçalama
+
+PDF okuyucusunun sayfa kayıtlarını karakter sınırlarıyla parçalamak için proje kökünden şu komutu çalıştırın:
+
+```bash
+python -m src.chunking.text_chunker sample_docs/Fatih_RAG_OCR_Multimodal_PDF_Use_Case.pdf
+```
+
+Komut varsayılan olarak en fazla 1000 Python karakteri ve 100 karakter örtüşme kullanır; örnek bir parçanın dosya adını ve kaynak sayfasını gösterir.
+
+Boyut birimi tokenizer token'ı değildir; Python `len()` ile sayılan Unicode karakter konumlarıdır.
+
+`chunk_pages(pages, max_chars=1000, overlap=100)` fonksiyonu her sayfayı ayrı işler, boş sayfaları atlar ve kalan parçalarda okuyucunun sayfa metaverisini korur.
