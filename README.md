@@ -2,7 +2,9 @@
 
 > **RAG, OCR ve Görsel Doküman Anlama Üzerine Kapsamlı Doküman Zekâsı Projesi**
 
-HybridDoc AI; salt metin tabanlı dijital PDF'lerin yanı sıra taranmış sayfalar, ekran görüntüleri, tablolar ve şemalar içeren dokümanları işleyebilen, kaynak kanıtlarını (sayfa numarası, içerik türü, bounding box) doğrulayan ve şeffaf referanslar sunan açık kaynaklı bir doküman zekâsı platformudur.
+HybridDoc AI; dijital PDF'lerin yanı sıra taranmış sayfalar, ekran görüntüleri, tablolar ve şemalar içeren dokümanları işlemeyi, kaynak kanıtlarını (sayfa numarası, içerik türü, bounding box) doğrulamayı ve şeffaf referanslar sunmayı hedefleyen açık kaynaklı bir doküman zekâsı projesidir.
+
+Şu anda dijital PDF'lerden sayfa metni ve kaynak metaverisi çıkarma ile aşağıda açıklanan metin parçalama bileşeni mevcuttur. Embeddings, Chroma retrieval, 20 doküman sorusuyla değerlendirme, LLM ve kullanıcı arayüzü sonraki geliştirme adımlarıdır; OCR ve multimodal işleme henüz uygulanmamıştır.
 
 ---
 
@@ -24,6 +26,8 @@ HybridDoc AI; salt metin tabanlı dijital PDF'lerin yanı sıra taranmış sayfa
 ---
 
 ## 📁 Proje Klasör Mimarisi
+
+Aşağıdaki yapı hedeflenen sorumlulukları gösterir; mevcut bileşenler dışındaki klasörler şimdilik yer tutucudur.
 
 ```text
 RAG-OCR-proje/
@@ -66,3 +70,17 @@ RAG-OCR-proje/
    ```bash
    cp .env.example .env
    ```
+
+## Sayfa Kaynaklı Metin Parçalama
+
+PDF okuyucusunun sayfa kayıtlarını karakter sınırlarıyla parçalamak için proje kökünden şu komutu çalıştırın:
+
+```bash
+python -m src.chunking.text_chunker sample_docs/Fatih_RAG_OCR_Multimodal_PDF_Use_Case.pdf
+```
+
+Komut varsayılan olarak en fazla 1000 Python karakteri ve 100 karakter örtüşme kullanır; örnek bir parçanın dosya adını ve kaynak sayfasını gösterir.
+
+Boyut birimi tokenizer token'ı değildir; Python `len()` ile sayılan Unicode karakter konumlarıdır.
+
+`chunk_pages(pages, max_chars=1000, overlap=100)` fonksiyonu her sayfayı ayrı işler, boş veya yalnızca boşluk içeren sayfaları atlar ve parçalarda kaynak `page_number`, `file_name` ve `total_pages` alanlarını korur. Her parçanın `text` alanı ilgili metin dilimini, `char_count` alanı ise o parçanın karakter sayısını içerir. `max_chars` pozitif bir tam sayı, `overlap` ise `0 <= overlap < max_chars` koşulunu sağlayan bir tam sayı olmalıdır; boolean değerler kabul edilmez.
