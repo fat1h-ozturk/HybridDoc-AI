@@ -393,3 +393,111 @@ def test_rotated_pages_keep_native_geometry_text_and_recognition_crops(
             assert f['source_sha256'] == result['source_sha256']
     assert path.read_bytes() == before
     assert pdf_loader.load_pdf(path) == ordinary
+
+
+def test_multiline_omitted_prose_interval_does_not_bridge_formulas(tmp_path):
+    path = tmp_path / 'synthetic_multiline.pdf'
+    crops = []
+
+    class Recognizer:
+        def recognize(self, png):
+            crops.append(png)
+            return 'candidate'
+
+    with pymupdf.open() as doc:
+        p = doc.new_page(width=500, height=400)
+        # Line 1: formula on left, long prose interval, formula on right
+        p.insert_text((40, 60), 'f(x) = C')
+        p.insert_text((110, 60), ' on the branch of the initial point. The condition gives ')
+        p.insert_text((420, 60), 'C =')
+
+        # Line 2: wrapped constant on left, followed by prose
+        p.insert_text((40, 78), '2')
+        p.insert_text((47, 72), '-', fontsize=6)
+        p.insert_text((53, 70), '2', fontsize=6)
+        p.insert_text((53, 75), '3', fontsize=6)
+        p.draw_line((53, 72), (58, 72))
+        p.insert_text((65, 78), '. Cubing both sides yields the final equation.')
+
+        # Counterexample 1: contiguous multiline fraction (numerator on top, denominator below)
+        p.insert_text((100, 130), 'a + b')
+        p.insert_text((100, 145), 'c + d')
+        p.draw_line((98, 134), (135, 134))
+
+        # Counterexample 2: root scope
+        writer = pymupdf.TextWriter(p.rect)
+        writer.append((80, 190), '√', font=pymupdf.Font('symbol'), fontsize=18)
+        writer.write_text(p)
+        p.draw_line((93, 175), (120, 175))
+        p.insert_text((96, 188), 'u + v')
+
+        # Counterexample 3: subscript and superscript
+        p.insert_text((40, 240), 'y(t) = a')
+        p.insert_text((88, 243), 'n', fontsize=7)
+        p.insert_text((96, 240), 't')
+        p.insert_text((101, 235), '2', fontsize=7)
+
+        # Counterexample 4: table cell isolation
+        for x in (30, 150, 270):
+            p.draw_line((x, 280), (x, 360))
+        for y in (280, 320, 360):
+            p.draw_line((30, y), (270, y))
+        p.insert_text((40, 305), 'm = 1')
+        p.insert_text((160, 305), 'n = 2')
+        p.insert_text((40, 345), 'k = 3')
+        p.insert_text((160, 345), 'p = 4')
+
+        doc.save(path)
+
+    result = optional_load(path, recognizer=Recognizer())[0]
+
+    # Verify Line 1 math and Line 2 math are split, not bridged across prose
+    f_left = next(f for f in result['formulas'] if 'f(x) = C' in f['original_text'])
+    f_right = next(f for f in result['formulas'] if 'C =' in f['original_text'])
+    f_line2 = next(f for f in result['formulas'] if any(c in f['original_text'] for c in ('2', '3')) and f['bbox'][1] > 60)
+
+    assert f_left['id'] != f_line2['id']
+    assert f_left['bbox'][3] <= 70.0
+    assert 'Cubing' not in f_left['original_text']
+    assert 'initial point' not in f_left['original_text']
+
+    assert f_right['id'] != f_left['id']
+    assert f_right['id'] != f_line2['id']
+
+    assert f_line2['bbox'][1] >= 60.0
+    assert 'initial point' not in f_line2['original_text']
+    assert 'f(x)' not in f_line2['original_text']
+
+    # Counterexample 1: multiline fraction
+    f_frac = next(f for f in result['formulas'] if 'a + b' in f['original_text'])
+    assert 'c + d' in f_frac['original_text']
+    assert len(f_frac['native_rules']) == 1
+
+    # Counterexample 2: root scope
+    f_root = next(f for f in result['formulas'] if '√' in f['original_text'])
+    assert 'u + v' in f_root['original_text']
+
+    # Counterexample 3: subscript/superscript
+    f_script = next(f for f in result['formulas'] if 'y(t) = a' in f['original_text'])
+    assert f_script['native_script_evidence']
+
+    # Counterexample 4: table cell isolation
+    table_formulas = [f for f in result['formulas'] if 'table_cell' in f]
+    assert len(table_formulas) == 4
+    assert {(f['table_cell']['row'], f['table_cell']['column']) for f in table_formulas} == {
+        (0, 0), (0, 1), (1, 0), (1, 1)
+    }
+
+    # Common invariants
+    for f in result['formulas']:
+        assert not f['answer_eligible']
+        assert f['state'] in ('unresolved', 'unverified')
+
+    ordered = [f for f in sorted(result['formulas'], key=lambda f: (
+        '√' not in f['original_text'], '=' not in f['original_text'])) if len(f['original_text'].strip()) >= 3]
+    assert len(crops) == len(ordered)
+    with pymupdf.open(path) as doc:
+        for f, crop in zip(ordered, crops):
+            expected = doc[0].get_pixmap(matrix=pymupdf.Matrix(3, 3), clip=pymupdf.Rect(f['bbox']))
+            actual = pymupdf.Pixmap(crop)
+            assert actual.samples == expected.samples
