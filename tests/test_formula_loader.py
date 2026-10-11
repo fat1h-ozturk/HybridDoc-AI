@@ -126,6 +126,96 @@ def test_outside_formula_does_not_absorb_adjacent_table_spans(
             assert pymupdf.Pixmap(crop).samples == expected.samples
 
 
+@pytest.mark.parametrize('in_table', [False, True])
+def test_fraction_bar_groups_distant_operands_for_recognition(tmp_path, in_table):
+    path = tmp_path / 'fraction.pdf'
+    crops = []
+
+    class Recognizer:
+        def recognize(self, png):
+            crops.append(png)
+            return r'\frac{x}{y}'
+
+    with pymupdf.open() as doc:
+        p = doc.new_page(width=300, height=300)
+        if in_table:
+            for x in (90, 130, 170):
+                p.draw_line((x, 60), (x, 180))
+            for y in (60, 130, 180):
+                p.draw_line((90, y), (170, y))
+            p.insert_text((140, 110), 'tag')
+        p.insert_text((100, 85), 'x')
+        p.insert_text((100, 110), 'y')
+        p.draw_line((98, 94), (110, 94))
+        doc.save(path)
+
+    native = optional_load(path)[0]
+    result = optional_load(path, recognizer=Recognizer())[0]
+    for page in (native, result):
+        assert len(page['formulas']) == 1
+        formula = page['formulas'][0]
+        assert formula['original_text'].split() == ['x', 'y']
+        assert formula['bbox'][0] <= 98 and formula['bbox'][2] >= 110
+        assert formula['bbox'][1] <= 73 and formula['bbox'][3] >= 113
+        assert formula['native_rules'] == [[98, 94, 110, 94]]
+        assert not formula['answer_eligible']
+        if in_table:
+            assert formula['table_cell'] == {'table': 0, 'row': 0, 'column': 0}
+            assert 'tag' in page['text']
+        else:
+            assert 'table_cell' not in formula
+    assert len(crops) == 1
+    formula = result['formulas'][0]
+    assert formula['recognition_status'] == 'returned'
+    assert formula['state'] == 'unresolved'
+    with pymupdf.open(path) as doc:
+        expected = doc[0].get_pixmap(
+            matrix=pymupdf.Matrix(3, 3), clip=pymupdf.Rect(formula['bbox']))
+        assert pymupdf.Pixmap(crops[0]).samples == expected.samples
+
+
+@pytest.mark.parametrize('baseline', [95, 195])
+@pytest.mark.parametrize('reverse', [False, True])
+def test_table_borders_do_not_join_outside_equation_crops(tmp_path, baseline, reverse):
+    path = tmp_path / 'border.pdf'
+    crops = []
+
+    class Recognizer:
+        def recognize(self, png):
+            crops.append(png)
+            return 'candidate'
+
+    with pymupdf.open() as doc:
+        p = doc.new_page(width=300, height=300)
+        for x in (100, 140, 180):
+            p.draw_line((x, 100), (x, 180))
+        for y in (100, 140, 180):
+            start, end = ((180, y), (100, y)) if reverse else ((100, y), (180, y))
+            p.draw_line(start, end)
+        p.insert_text((110, baseline), 'x=1')
+        p.insert_text((160, baseline), 'z=2')
+        p.insert_text((110, 115 if baseline == 95 else 175), 'tag')
+        p.insert_text((150, 165 if baseline == 95 else 125), 'ODE')
+        doc.save(path)
+
+    native = optional_load(path)[0]
+    result = optional_load(path, recognizer=Recognizer())[0]
+    for page in (native, result):
+        assert [f['original_text'] for f in page['formulas']] == ['x=1', 'z=2']
+        assert 'tag' in page['text'] and 'ODE' in page['text']
+        for formula in page['formulas']:
+            assert formula['native_rules'] == []
+            assert formula['bbox'][2] - formula['bbox'][0] < 30
+            assert 'table_cell' not in formula
+            assert not formula['answer_eligible']
+    assert len(crops) == 2
+    with pymupdf.open(path) as doc:
+        for formula, crop in zip(result['formulas'], crops):
+            expected = doc[0].get_pixmap(
+                matrix=pymupdf.Matrix(3, 3), clip=pymupdf.Rect(formula['bbox']))
+            assert pymupdf.Pixmap(crop).samples == expected.samples
+
+
 def test_returned_latex_remains_explicitly_unverified(math_pdf):
     class Recognizer:
         def recognize(self, png):

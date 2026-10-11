@@ -58,17 +58,30 @@ def propose_regions(page):
                                       'row': row, 'column': col})
     except Exception as exc:
         table_error = f'table detection failed: {exc}'
+    for s in spans:
+        s['cell'] = next((c for c in cells if c['bbox'].contains(
+            pymupdf.Point((s['bbox'].x0+s['bbox'].x1)/2,
+                          (s['bbox'].y0+s['bbox'].y1)/2))), None)
     rules = []
     for drawing in page.get_drawings():
         for item in drawing['items']:
             if item[0] == 'l':
                 a, b = item[1:]
                 if abs(a.y - b.y) < .1 and abs(a.x - b.x) > 2:
-                    rules.append(pymupdf.Rect(min(a.x, b.x), a.y, max(a.x, b.x), a.y))
+                    rule = pymupdf.Rect(min(a.x, b.x), a.y, max(a.x, b.x), a.y)
+                    if not any(rule.x0 < c['bbox'].x1 and rule.x1 > c['bbox'].x0
+                               and (abs(rule.y0-c['bbox'].y0) < 1
+                                    or abs(rule.y0-c['bbox'].y1) < 1) for c in cells):
+                        cell = next((c for c in cells if c['bbox'].contains(
+                            pymupdf.Point((rule.x0+rule.x1)/2, rule.y0))), None)
+                        rules.append((rule, cell))
+    regions = []
     # A bar with glyphs on both sides is evidence of math, not its interpretation.
-    for rule in rules:
+    for rule, cell in rules:
         above, below = [], []
         for i, s in enumerate(spans):
+            if s['cell'] != cell or len(s['text'].strip()) > 12:
+                continue
             box = s['bbox']
             if box.x0 < rule.x1 and box.x1 > rule.x0:
                 cy = (box.y0 + box.y1) / 2
@@ -76,14 +89,17 @@ def propose_regions(page):
                     (above if cy < rule.y0 else below).append(i)
         if above and below and rule.width < .8 * page.rect.width:
             for i in above + below:
-                if len(spans[i]['text'].strip()) <= 12:
-                    spans[i]['math'] = True
-    regions = []
+                spans[i]['math'] = True
+            if cell is None:
+                box = pymupdf.Rect(rule.x0, rule.y0-.05, rule.x1, rule.y0+.05)
+                for i in above + below:
+                    box |= spans[i]['bbox']
+                regions.append({'bbox': box, 'span_ids': set(above + below),
+                                'size': max(spans[i]['size'] for i in above + below),
+                                'cell': None})
     for i, s in enumerate(spans):
-        cell = s['cell'] = next((c for c in cells if c['bbox'].contains(
-            pymupdf.Point((s['bbox'].x0+s['bbox'].x1)/2,
-                          (s['bbox'].y0+s['bbox'].y1)/2))), None)
-        if not s['math']:
+        cell = s['cell']
+        if not s['math'] or any(i in r['span_ids'] for r in regions):
             continue
         if cell:
             found = next((r for r in regions if r['cell'] == cell), None)
@@ -111,8 +127,8 @@ def propose_regions(page):
     _merge_regions(regions)
     for r in regions:
         related = []
-        for rule in rules:
-            if r['cell'] and (abs(rule.y0-r['bbox'].y0) < 1 or abs(rule.y0-r['bbox'].y1) < 1):
+        for rule, cell in rules:
+            if cell != r['cell']:
                 continue
             if (rule.x0 < r['bbox'].x1 and rule.x1 > r['bbox'].x0
                     and r['bbox'].y0-r['size']*.5 <= rule.y0 <= r['bbox'].y1+r['size']*.5):
