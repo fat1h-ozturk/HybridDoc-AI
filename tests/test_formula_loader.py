@@ -501,3 +501,55 @@ def test_multiline_omitted_prose_interval_does_not_bridge_formulas(tmp_path):
             expected = doc[0].get_pixmap(matrix=pymupdf.Matrix(3, 3), clip=pymupdf.Rect(f['bbox']))
             actual = pymupdf.Pixmap(crop)
             assert actual.samples == expected.samples
+
+
+def test_short_relational_fragment_triggers_recognition_while_lone_symbol_skipped(tmp_path):
+    path = tmp_path / 'short_relational.pdf'
+    recorded_crops = []
+
+    class DeterministicRecognizer:
+        def recognize(self, png):
+            recorded_crops.append(png)
+            if len(recorded_crops) == 2:
+                raise RuntimeError('synthetic failure on second candidate')
+            return r'K ='
+
+    with pymupdf.open() as doc:
+        p = doc.new_page(width=300, height=300)
+        p.insert_text((40, 50), 'K=')
+        p.insert_text((40, 80), 'Prose separates first formula.')
+        writer = pymupdf.TextWriter(p.rect)
+        writer.append((40, 120), '√', font=pymupdf.Font('symbol'), fontsize=14)
+        writer.write_text(p)
+        p.insert_text((40, 160), 'More prose separates another formula.')
+        p.insert_text((40, 200), 'y=')
+        doc.save(path)
+
+    pages = optional_load(path, recognizer=DeterministicRecognizer())
+    assert len(pages) == 1
+    page = pages[0]
+    formulas = {f['original_text']: f for f in page['formulas']}
+
+    # 1. Short assignment LHS triggers recognition and stores candidate as unverified/unresolved
+    f_k = formulas['K=']
+    assert f_k['recognition_status'] == 'returned'
+    assert f_k['latex'] == r'K ='
+    assert f_k['state'] in ('unverified', 'unresolved')
+    assert not f_k['answer_eligible']
+
+    # 2. Lone symbol control remains not_requested
+    f_lone = formulas['√']
+    assert f_lone['recognition_status'] == 'not_requested'
+    assert f_lone['reason'] == 'isolated_math_reference_requires_review'
+    assert f_lone['latex'] is None
+    assert not f_lone['answer_eligible']
+
+    # 3. Failure handling on short relational fragment
+    f_y = formulas['y=']
+    assert f_y['recognition_status'] == 'failed'
+    assert 'synthetic failure' in f_y['reason']
+    assert f_y['state'] == 'unresolved'
+    assert not f_y['answer_eligible']
+
+    # Recognizer was called only for the two short relational fragments, never for lone symbol
+    assert len(recorded_crops) == 2
