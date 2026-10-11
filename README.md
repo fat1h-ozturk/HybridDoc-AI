@@ -131,7 +131,8 @@ python -m src.ingestion.formula_loader belge.pdf --recognize \
 ```
 
 Standart çıktı tüm sayfaları, özgün metni, bbox'ları, aday LaTeX'i ve nedenleri
-gösterir; `--output` aynı JSON'u UTF-8 dosyaya da yazar. Başarılı dosya çıkarma
+tek bir JSON belgesi olarak gösterir; bağımlılık tanıları standart hataya
+(stderr) yönlendirilir. `--output` aynı JSON'u UTF-8 dosyaya da yazar. Başarılı dosya çıkarma
 (exit 0), formüllerin doğru olduğu anlamına gelmez. Tanıma her bölgede CPU
 float32, iki thread ve batch bir kullanır; süre sınırı model yüklemesini de
 kapsar. Bir worker hatasından sonra belge boyunca yeni worker başlatılmaz.
@@ -153,13 +154,16 @@ with LocalFormulaRecognizer(cache_dir=".cache/formulas") as recognizer:
 chunks = chunk_formula_pages(pages, max_chars=1000, overlap=100)
 ```
 
-`chunk_formula_pages` formül bloklarını atomik tutar; bir LaTeX bloğu sınırdan
+`chunk_formula_pages` formül ve uyarı bloklarını atomik tutar; bir atomik blok sınırdan
 uzunsa tek, daha büyük parça üretir. Düz yazı blokları karakter/örtüşme
 kurallarını kullanır; formül örtüşmesi yapılmaz. Parçalar kaynak sayfa, hash,
 bbox, özgün metin ve belirsizlik alanlarını korur.
 
 **Güven sözleşmesi:** Her formül `original_text`, `latex`, `page_number`,
 `bbox`, `source_sha256`, `recognition_status`, `state` ve `reason` taşır.
+Formül bbox'ları döndürülmemiş sayfanın koordinat sistemindedir; özgün bölge
+metni ve tanıma görüntüsü de aynı geometriyle çıkarılır. PDF dosyasının kayıtlı
+sayfa dönüşü değiştirilmez.
 `unverified` modelin aday döndürdüğünü; `unresolved` tanıma yapılmadığını,
 başarısız olduğunu veya çizgili kapsam/script bağlantısının kaynak incelemesi gerektirdiğini
 belirtir. İkisi de doğrulanmış gerçek değildir. Yerel detector işaretsiz inline
