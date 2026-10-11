@@ -17,6 +17,7 @@ def load_pdf_formulas(file_path, *, recognizer=None):
     pages, pending = [], []
     with pymupdf.open(loader.file_path) as doc:
         for pn, page in enumerate(doc, 1):
+            page.set_rotation(0)
             regions, spans, table_error = propose_regions(page)
             formulas, owners = [], {}
             blocks = [{'kind': 'warning', 'text':

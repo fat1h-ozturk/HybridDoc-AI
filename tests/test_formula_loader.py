@@ -136,3 +136,68 @@ def test_native_script_attachment_stays_unresolved_even_when_model_returns(math_
     assert scripts['state'] == 'unresolved'
     assert scripts['native_script_evidence'] is True
     assert not scripts['answer_eligible']
+
+
+@pytest.mark.parametrize('rotation', [0, 90, 180, 270])
+@pytest.mark.parametrize('width,height', [(300, 600), (600, 300)])
+def test_rotated_pages_keep_native_geometry_text_and_recognition_crops(
+        tmp_path, rotation, width, height):
+    path = tmp_path / 'rotated.pdf'
+    crops = []
+
+    class Recognizer:
+        def recognize(self, png):
+            crops.append(png)
+            return 'x=1'
+
+    with pymupdf.open() as doc:
+        page = doc.new_page(width=width, height=height)
+        page.insert_text((width - 100, height - 100), 'x = 1')
+        page.insert_text((30, 70), 'numerator')
+        page.insert_text((30, 92), 'denominator')
+        page.draw_line((25, 75), (285, 75))
+        for x in (30, 130, 230):
+            page.draw_line((x, 120), (x, 200))
+        for y in (120, 160, 200):
+            page.draw_line((30, y), (230, y))
+        page.insert_text((40, 145), 'Equation')
+        page.insert_text((140, 145), 'Type')
+        page.insert_text((40, 185), 'z = 2')
+        page.insert_text((140, 185), 'ODE')
+        page.set_rotation(rotation)
+        doc.save(path)
+
+    before = path.read_bytes()
+    ordinary = pdf_loader.load_pdf(path)
+    native = optional_load(path)[0]
+    result = optional_load(path, recognizer=Recognizer())[0]
+    assert result['original_text'] == ordinary[0]['text']
+    assert native['formulas']
+    formula = next(f for f in result['formulas'] if 'x = 1' in f['original_text'])
+    assert formula['bbox'][0] > width - 110
+    assert formula['bbox'][1] > height - 120
+    assert formula['recognition_status'] == 'returned'
+    table = next(f for f in result['formulas'] if 'z = 2' in f['original_text'])
+    assert table['table_cell']['row'] == 1
+    assert table['table_cell']['column'] == 0
+    assert 'ODE' not in table['original_text']
+    fractions = [f for f in result['formulas'] if 'numerator' in f['original_text']]
+    assert bool(fractions) == (width == 600)
+    assert len(crops) == len(result['formulas'])
+    with pymupdf.open(path) as doc:
+        assert doc[0].rotation == rotation
+        doc[0].set_rotation(0)
+        ordered = sorted(result['formulas'], key=lambda f: (
+            '√' not in f['original_text'], '=' not in f['original_text']))
+        for f, crop in zip(ordered, crops):
+            expected = doc[0].get_pixmap(
+                matrix=pymupdf.Matrix(3, 3), clip=pymupdf.Rect(f['bbox']))
+            actual = pymupdf.Pixmap(crop)
+            assert (actual.width, actual.height) == (expected.width, expected.height)
+            assert actual.samples == expected.samples
+            assert min(actual.samples) < 255
+            assert not f['answer_eligible']
+            assert f['state'] in ('unresolved', 'unverified')
+            assert f['source_sha256'] == result['source_sha256']
+    assert path.read_bytes() == before
+    assert pdf_loader.load_pdf(path) == ordinary
