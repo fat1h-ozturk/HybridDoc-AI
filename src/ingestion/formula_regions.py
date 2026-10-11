@@ -105,6 +105,7 @@ def propose_regions(page):
             found = next((r for r in regions if r['cell'] == cell), None)
             if found:
                 found['span_ids'].add(i)
+                found['size'] = max(found['size'], s['size'])
                 continue
         regions.append({'bbox': pymupdf.Rect(cell['bbox'] if cell else s['bbox']),
                         'span_ids': {i}, 'size': s['size'], 'cell': cell})
@@ -121,9 +122,9 @@ def propose_regions(page):
                           _near(r['bbox'], s['bbox'], r['size']))
             if inside:
                 r['span_ids'].add(i)
+                r['size'] = max(r['size'], s['size'])
                 if not r['cell']:
                     r['bbox'] |= s['bbox']
-                    r['size'] = max(r['size'], s['size'])
     _merge_regions(regions)
     for r in regions:
         related = []

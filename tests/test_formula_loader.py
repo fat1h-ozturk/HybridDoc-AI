@@ -271,6 +271,54 @@ def test_invalid_recognizer_output_cannot_become_trusted_text(math_pdf, candidat
     assert "y' =" not in page['text']
 
 
+@pytest.mark.parametrize('region_kind', ['table', 'outside', 'fraction'])
+@pytest.mark.parametrize('script_first', [True, False])
+@pytest.mark.parametrize('script_text,body_text', [
+    ('n=2', 'x=1'), ('2', 'x=1'), ('n=2', 'x'),
+])
+def test_unflagged_script_evidence_is_independent_of_span_order(
+        tmp_path, region_kind, script_first, script_text, body_text):
+    path = tmp_path / 'ordered-script.pdf'
+
+    class Recognizer:
+        def recognize(self, png):
+            return 'candidate'
+
+    with pymupdf.open() as doc:
+        p = doc.new_page(width=300, height=300)
+        if region_kind == 'table':
+            for x in (90, 150, 210):
+                p.draw_line((x, 60), (x, 180))
+            for y in (60, 130, 180):
+                p.draw_line((90, y), (210, y))
+        elif region_kind == 'fraction':
+            p.draw_line((98, 94), (120, 94))
+        parts = [((100, 90), script_text, 7), ((100, 107), body_text, 11)]
+        if not script_first:
+            parts.reverse()
+        for position, text, size in parts:
+            p.insert_text(position, text, fontsize=size)
+        spans = [s for b in p.get_text('dict')['blocks']
+                 for line in b.get('lines', []) for s in line['spans']]
+        assert [s['text'] for s in spans] == [part[1] for part in parts]
+        assert all(not s['flags'] & 1 for s in spans)
+        doc.save(path)
+
+    native = optional_load(path)[0]
+    recognized = optional_load(path, recognizer=Recognizer())[0]
+    for page in (native, recognized):
+        assert len(page['formulas']) == 1
+        formula = page['formulas'][0]
+        assert script_text in formula['original_text']
+        assert body_text in formula['original_text']
+        assert formula['native_script_evidence'] is True
+        assert formula['state'] == 'unresolved'
+        assert not formula['answer_eligible'] and not page['answer_eligible']
+        assert ('table_cell' in formula) == (region_kind == 'table')
+    assert recognized['formulas'][0]['recognition_status'] == 'returned'
+    assert recognized['formulas'][0]['reason'] == 'layout_scope_or_script_attachment_requires_source_review'
+
+
 def test_native_script_attachment_stays_unresolved_even_when_model_returns(math_pdf):
     class Recognizer:
         def recognize(self, png):
