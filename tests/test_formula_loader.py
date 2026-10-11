@@ -72,6 +72,60 @@ def test_table_candidate_keeps_its_cell_without_neighboring_classification(math_
     assert 'ODE' in page['text']
 
 
+@pytest.mark.parametrize('outside_xy,inside_xy,row,column', [
+    ((80, 165), (110, 165), 1, 0),
+    ((190, 165), (160, 165), 1, 1),
+    ((110, 95), (110, 115), 0, 0),
+    ((110, 195), (110, 175), 1, 0),
+])
+@pytest.mark.parametrize('cell_text', ['y=2', 'tag'])
+def test_outside_formula_does_not_absorb_adjacent_table_spans(
+        tmp_path, outside_xy, inside_xy, row, column, cell_text):
+    path = tmp_path / 'adjacent.pdf'
+    crops = []
+
+    class Recognizer:
+        def recognize(self, png):
+            crops.append(png)
+            return 'candidate'
+
+    with pymupdf.open() as doc:
+        page = doc.new_page(width=300, height=300)
+        for x in (100, 140, 180):
+            page.draw_line((x, 100), (x, 180))
+        for y in (100, 140, 180):
+            page.draw_line((100, y), (180, y))
+        page.insert_text(outside_xy, 'x=1')
+        page.insert_text(inside_xy, cell_text)
+        page.insert_text((150 if column == 0 else 110,
+                          125 if row == 1 else 165), 'ODE')
+        doc.save(path)
+
+    native = optional_load(path)[0]
+    result = optional_load(path, recognizer=Recognizer())[0]
+    for extracted in (native, result):
+        outside = next(f for f in extracted['formulas'] if 'x=1' in f['original_text'])
+        assert outside['original_text'] == 'x=1'
+        assert 'table_cell' not in outside
+        assert 'ODE' in extracted['text']
+        cells = [f for f in extracted['formulas'] if 'table_cell' in f]
+        if cell_text == 'y=2':
+            assert len(extracted['formulas']) == 2
+            assert len(cells) == 1
+        elif not cells:
+            assert 'tag' in extracted['text']
+        for cell in cells:
+            assert cell['original_text'] == cell_text
+            assert cell['table_cell'] == {'table': 0, 'row': row, 'column': column}
+        assert all(not f['answer_eligible'] for f in extracted['formulas'])
+    assert len(crops) == len(result['formulas'])
+    with pymupdf.open(path) as doc:
+        for formula, crop in zip(result['formulas'], crops):
+            expected = doc[0].get_pixmap(
+                matrix=pymupdf.Matrix(3, 3), clip=pymupdf.Rect(formula['bbox']))
+            assert pymupdf.Pixmap(crop).samples == expected.samples
+
+
 def test_returned_latex_remains_explicitly_unverified(math_pdf):
     class Recognizer:
         def recognize(self, png):

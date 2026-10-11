@@ -80,11 +80,11 @@ def propose_regions(page):
                     spans[i]['math'] = True
     regions = []
     for i, s in enumerate(spans):
-        if not s['math']:
-            continue
-        cell = next((c for c in cells if c['bbox'].contains(
+        cell = s['cell'] = next((c for c in cells if c['bbox'].contains(
             pymupdf.Point((s['bbox'].x0+s['bbox'].x1)/2,
                           (s['bbox'].y0+s['bbox'].y1)/2))), None)
+        if not s['math']:
+            continue
         if cell:
             found = next((r for r in regions if r['cell'] == cell), None)
             if found:
@@ -101,7 +101,7 @@ def propose_regions(page):
             if r['cell']:
                 inside = r['bbox'].contains(s['bbox'])
             else:
-                inside = (len(s['text'].strip()) <= 8 and
+                inside = (s['cell'] is None and len(s['text'].strip()) <= 8 and
                           _near(r['bbox'], s['bbox'], r['size']))
             if inside:
                 r['span_ids'].add(i)
