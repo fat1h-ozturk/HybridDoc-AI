@@ -31,6 +31,32 @@ def chunk_pages(
     return chunks
 
 
+
+def chunk_formula_pages(pages, max_chars=1000, overlap=100):
+    """Separate optional API: formula and warning blocks are atomic.
+
+    Text blocks use the old character/overlap behavior. Atomic blocks may exceed
+    max_chars; overlap never repeats part of a formula. Each chunk retains page
+    provenance and only the formula records actually present in that chunk.
+    """
+    # Reuse the old API's argument validation even for an empty document.
+    chunk_pages([], max_chars, overlap)
+    chunks = []
+    for page in pages:
+        formulas = {f['id']: f for f in page['formulas']}
+        for block in page['blocks']:
+            metadata = {**page, 'blocks': [block], 'formulas': []}
+            if block['kind'] == 'text':
+                chunks.extend(chunk_pages([{**metadata, 'text': block['text']}],
+                                          max_chars, overlap))
+            else:
+                if block['kind'] == 'formula':
+                    metadata['formulas'] = [formulas[block['formula_id']]]
+                chunks.append({**metadata, 'text': block['text'],
+                               'char_count': len(block['text'])})
+    return chunks
+
+
 if __name__ == "__main__":
     import sys
     from pathlib import Path
