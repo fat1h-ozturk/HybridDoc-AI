@@ -97,7 +97,8 @@ def main(argv=None):
     """Readable full JSON, optionally saved; native-only unless explicitly enabled."""
     import argparse
     import json
-    from contextlib import nullcontext
+    import sys
+    from contextlib import nullcontext, redirect_stdout
     from src.ingestion.formula_recognizer import LocalFormulaRecognizer
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('pdf', type=Path)
@@ -108,10 +109,11 @@ def main(argv=None):
     parser.add_argument('--output', type=Path, help='also save full UTF-8 JSON')
     args = parser.parse_args(argv)
     try:
-        context = (LocalFormulaRecognizer(args.cache_dir, args.timeout, args.budget)
-                   if args.recognize else nullcontext(None))
-        with context as recognizer:
-            pages = load_pdf_formulas(args.pdf, recognizer=recognizer)
+        with redirect_stdout(sys.stderr):
+            context = (LocalFormulaRecognizer(args.cache_dir, args.timeout, args.budget)
+                       if args.recognize else nullcontext(None))
+            with context as recognizer:
+                pages = load_pdf_formulas(args.pdf, recognizer=recognizer)
         rendered = json.dumps(pages, ensure_ascii=False, indent=2)
         if args.output:
             args.output.write_text(rendered + '\n', encoding='utf-8')

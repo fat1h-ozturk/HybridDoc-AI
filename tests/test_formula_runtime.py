@@ -1,5 +1,8 @@
 import json
+import subprocess
+import sys
 import time
+from pathlib import Path
 import pytest
 from src.ingestion import formula_loader
 
@@ -65,18 +68,24 @@ def test_worker_timeout_and_document_budget(monkeypatch):
             runtime.LocalFormulaRecognizer(timeout_seconds=value)
 
 
-def test_cli_full_output_and_file(tmp_path, capsys):
+def test_cli_full_output_and_file(tmp_path):
     import pymupdf
     path = tmp_path / 'inline.pdf'
     with pymupdf.open() as doc:
         doc.new_page().insert_text((30, 40), 'Inline equation x = 2 in prose.')
         doc.save(path)
     output = tmp_path / 'output.json'
-    assert formula_loader.main([str(path), '--output', str(output)]) == 0
-    data = json.loads(output.read_text())
+    result = subprocess.run(
+        [sys.executable, '-m', 'src.ingestion.formula_loader', str(path),
+         '--output', str(output)],
+        cwd=Path(__file__).resolve().parents[1], capture_output=True,
+        text=True, encoding='utf-8', timeout=30)
+    assert result.returncode == 0, result.stderr
+    data = json.loads(result.stdout)
+    assert result.stdout == output.read_text(encoding='utf-8')
     assert data[0]['formulas']
     assert data[0]['answer_eligible'] is False
-    readable = capsys.readouterr().out
+    readable = result.stdout
     assert 'Inline equation x = 2 in prose.' in readable
     assert 'bbox' in readable and 'unresolved' in readable
     assert 'not answer evidence' in readable

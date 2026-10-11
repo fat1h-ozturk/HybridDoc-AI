@@ -2,11 +2,13 @@
 import math
 import multiprocessing
 import os
+import sys
 import time
 from pathlib import Path
 
 
 def _worker(connection, cache_dir):
+    sys.stdout = sys.stderr
     # Offline settings affect this isolated process only, never the caller.
     os.environ['HF_HUB_OFFLINE'] = '1'
     os.environ['TRANSFORMERS_OFFLINE'] = '1'
