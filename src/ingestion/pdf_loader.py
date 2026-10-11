@@ -95,3 +95,13 @@ if __name__ == "__main__":
                 print("✨ Tüm sayfalar dijital metin içeriyor.")
     except Exception as err:
         print(f"❌ Hata: {err}")
+
+
+def load_pdf_formulas(file_path: str | Path, *, recognizer=None) -> List[Dict[str, Any]]:
+    """Optional native regions/local LaTeX candidates; see formula_loader CLI.
+
+    Successful recognition is unverified and must not be used as answer evidence.
+    The original load_pdf API and output remain unchanged.
+    """
+    from src.ingestion.formula_loader import load_pdf_formulas as extract
+    return extract(file_path, recognizer=recognizer)

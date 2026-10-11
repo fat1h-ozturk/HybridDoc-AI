@@ -38,3 +38,7 @@ npm-debug.log*
 *.swo
 .DS_Store
 Thumbs.db
+
+# Optional local formula runtime and model cache
+.venv-formulas/
+.cache/
