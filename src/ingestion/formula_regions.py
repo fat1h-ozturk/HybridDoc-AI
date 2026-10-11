@@ -15,14 +15,33 @@ def _near(a, b, size):
     return dx <= size * 1.5 and dy <= size * .65
 
 
-def _merge_regions(regions):
+def _has_omitted_interval(a, b, spans):
+    sids_a = a['span_ids']
+    sids_b = b['span_ids']
+    min_sid = min(min(sids_a), min(sids_b))
+    max_sid = max(max(sids_a), max(sids_b))
+    all_sids = sids_a | sids_b
+    merged_box = a['bbox'] | b['bbox']
+    for k in range(min_sid + 1, max_sid):
+        if k not in all_sids:
+            s = spans[k]
+            if not merged_box.contains(s['bbox']):
+                return True
+            if not s['math'] and len(s['text'].strip()) > 8:
+                return True
+    return False
+
+
+def _merge_regions(regions, spans):
     changed = True
     while changed:
         changed = False
         for ai, a in enumerate(regions):
             for bi in range(ai + 1, len(regions)):
                 b = regions[bi]
-                if a['cell'] is None and b['cell'] is None and _near(a['bbox'], b['bbox'], max(a['size'], b['size'])):
+                if (a['cell'] is None and b['cell'] is None
+                        and _near(a['bbox'], b['bbox'], max(a['size'], b['size']))
+                        and not _has_omitted_interval(a, b, spans)):
                     a['bbox'] |= b['bbox']
                     a['span_ids'] |= b['span_ids']
                     a['size'] = max(a['size'], b['size'])
@@ -77,6 +96,7 @@ def propose_regions(page):
                         rules.append((rule, cell))
     regions = []
     # A bar with glyphs on both sides is evidence of math, not its interpretation.
+    math_rules = []
     for rule, cell in rules:
         above, below = [], []
         for i, s in enumerate(spans):
@@ -88,6 +108,10 @@ def propose_regions(page):
                 if abs(cy - rule.y0) < 1.5 * s['size']:
                     (above if cy < rule.y0 else below).append(i)
         if above and below and rule.width < .8 * page.rect.width:
+            min_dist_above = min(rule.y0 - (spans[i]['bbox'].y0 + spans[i]['bbox'].y1) / 2 for i in above)
+            above = [i for i in above if (rule.y0 - (spans[i]['bbox'].y0 + spans[i]['bbox'].y1) / 2) <= min_dist_above + 3.0]
+            min_dist_below = min((spans[i]['bbox'].y0 + spans[i]['bbox'].y1) / 2 - rule.y0 for i in below)
+            below = [i for i in below if ((spans[i]['bbox'].y0 + spans[i]['bbox'].y1) / 2 - rule.y0) <= min_dist_below + 3.0]
             for i in above + below:
                 spans[i]['math'] = True
             if cell is None:
@@ -97,6 +121,7 @@ def propose_regions(page):
                 regions.append({'bbox': box, 'span_ids': set(above + below),
                                 'size': max(spans[i]['size'] for i in above + below),
                                 'cell': None})
+            math_rules.append((rule, cell, set(above + below)))
     for i, s in enumerate(spans):
         cell = s['cell']
         if not s['math'] or any(i in r['span_ids'] for r in regions):
@@ -109,7 +134,7 @@ def propose_regions(page):
                 continue
         regions.append({'bbox': pymupdf.Rect(cell['bbox'] if cell else s['bbox']),
                         'span_ids': {i}, 'size': s['size'], 'cell': cell})
-    _merge_regions(regions)
+    _merge_regions(regions, spans)
     # Attach nearby small operands/scripts from other native blocks.
     for r in regions:
         for i, s in enumerate(spans):
@@ -119,20 +144,20 @@ def propose_regions(page):
                 inside = r['bbox'].contains(s['bbox'])
             else:
                 inside = (s['cell'] is None and len(s['text'].strip()) <= 8 and
-                          _near(r['bbox'], s['bbox'], r['size']))
+                          _near(r['bbox'], s['bbox'], r['size']) and
+                          not _has_omitted_interval(r, {'span_ids': {i}, 'bbox': s['bbox']}, spans))
             if inside:
                 r['span_ids'].add(i)
                 r['size'] = max(r['size'], s['size'])
                 if not r['cell']:
                     r['bbox'] |= s['bbox']
-    _merge_regions(regions)
+    _merge_regions(regions, spans)
     for r in regions:
         related = []
-        for rule, cell in rules:
+        for rule, cell, rule_spans in math_rules:
             if cell != r['cell']:
                 continue
-            if (rule.x0 < r['bbox'].x1 and rule.x1 > r['bbox'].x0
-                    and r['bbox'].y0-r['size']*.5 <= rule.y0 <= r['bbox'].y1+r['size']*.5):
+            if rule_spans & r['span_ids']:
                 related.append(list(rule))
                 if not r['cell']:
                     r['bbox'] |= pymupdf.Rect(rule.x0, rule.y0-.05, rule.x1, rule.y0+.05)
