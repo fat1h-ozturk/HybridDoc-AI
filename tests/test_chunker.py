@@ -59,3 +59,62 @@ def test_chunking_is_deterministic_and_empty_input_returns_no_chunks():
 def test_chunking_rejects_invalid_size_and_overlap(max_chars, overlap):
     with pytest.raises((TypeError, ValueError)):
         chunk_pages([], max_chars=max_chars, overlap=overlap)
+
+
+def test_chunk_formula_pages_handles_formula_group_atomically_when_oversized():
+    from src.chunking.text_chunker import chunk_formula_pages
+    f1 = {'id': 'p1-f1', 'original_text': 'K =', 'latex': 'K =', 'page_number': 1, 'bbox': [10, 10, 20, 20]}
+    f2 = {'id': 'p1-f2', 'original_text': '2^{-2/3}', 'latex': '2^{-2/3}', 'page_number': 1, 'bbox': [10, 30, 20, 40]}
+    grp = {
+        'id': 'p1-f1+p1-f2',
+        'kind': 'wrapped_relation',
+        'formula_ids': ['p1-f1', 'p1-f2'],
+        'formulas': [f1, f2],
+        'latex': 'K = 2^{-2/3}',
+        'state': 'unverified',
+        'answer_eligible': False,
+    }
+    block_text = "[UNVERIFIED FORMULA GROUP p1-f1+p1-f2; heuristic wrapped relation; not answer evidence]\n\\[ K = 2^{-2/3} \\]"
+    page = {
+        'page_number': 1,
+        'file_name': 'test.pdf',
+        'source_sha256': 'abc',
+        'answer_eligible': False,
+        'formulas': [f1, f2],
+        'formula_groups': [grp],
+        'blocks': [
+            {'kind': 'text', 'text': 'Short preceding text.'},
+            {'kind': 'formula_group', 'group_id': grp['id'], 'formula_ids': grp['formula_ids'], 'group': grp, 'text': block_text},
+            {'kind': 'text', 'text': 'Trailing text.'},
+        ],
+    }
+    # max_chars=15 is far smaller than the 110-character formula group block
+    chunks = chunk_formula_pages([page], max_chars=15, overlap=2)
+    # The oversized formula group block must remain ONE single atomic chunk (not sliced)
+    grp_chunks = [c for c in chunks if c.get('formula_groups')]
+    assert len(grp_chunks) == 1
+    c = grp_chunks[0]
+    assert c['text'] == block_text
+    assert c['char_count'] == len(block_text)
+    assert len(c['formulas']) == 2
+    assert [f['id'] for f in c['formulas']] == ['p1-f1', 'p1-f2']
+    assert not c['answer_eligible']
+
+
+def test_chunk_formula_pages_preserves_legacy_inputs_without_groups():
+    from src.chunking.text_chunker import chunk_formula_pages
+    f1 = {'id': 'p1-f1', 'original_text': 'x=1', 'latex': 'x=1', 'page_number': 1, 'bbox': [0, 0, 1, 1]}
+    legacy_page = {
+        'page_number': 1,
+        'file_name': 'legacy.pdf',
+        'source_sha256': 'sha',
+        'answer_eligible': False,
+        'formulas': [f1],
+        'blocks': [
+            {'kind': 'text', 'text': 'Legacy intro.'},
+            {'kind': 'formula', 'formula_id': 'p1-f1', 'text': '[FORMULA p1-f1]'},
+        ],
+    }
+    chunks = chunk_formula_pages([legacy_page], max_chars=50, overlap=5)
+    assert len(chunks) == 2
+    assert chunks[1]['formulas'] == [f1]

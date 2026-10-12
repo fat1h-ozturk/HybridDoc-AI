@@ -58,14 +58,21 @@ def propose_regions(page):
     Proposals deliberately overflag; boxes/LaTeX are never semantic verification.
     """
     spans = []
-    for block in page.get_text('rawdict')['blocks']:
-        for line in block.get('lines', []):
+    for b_idx, block in enumerate(page.get_text('rawdict')['blocks']):
+        if block.get('type') != 0:
+            continue
+        block_bbox = pymupdf.Rect(block['bbox'])
+        for l_idx, line in enumerate(block.get('lines', [])):
+            line_bbox = pymupdf.Rect(line['bbox'])
             for span in line['spans']:
                 text = ''.join(c['c'] for c in span['chars'])
                 if text.strip():
                     spans.append({'text': text, 'bbox': pymupdf.Rect(span['bbox']),
-                                  'size': span['size'], 'script': bool(span['flags'] & 1), 'math': _math_text(text, span['font'])
-                                  or bool(span['flags'] & 1)})
+                                  'size': span['size'], 'script': bool(span['flags'] & 1),
+                                  'math': _math_text(text, span['font'])
+                                  or bool(span['flags'] & 1),
+                                  'block_idx': b_idx, 'line_idx': l_idx,
+                                  'line_bbox': line_bbox, 'block_bbox': block_bbox})
     cells = []
     table_error = None
     try:

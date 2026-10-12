@@ -553,3 +553,204 @@ def test_short_relational_fragment_triggers_recognition_while_lone_symbol_skippe
 
     # Recognizer was called only for the two short relational fragments, never for lone symbol
     assert len(recorded_crops) == 2
+
+
+def test_wrapped_relational_fragment_groups_into_atomic_chunk(tmp_path):
+    from src.chunking.text_chunker import chunk_formula_pages
+
+    path = tmp_path / 'wrapped_relation.pdf'
+
+    class DeterministicRecognizer:
+        def __init__(self):
+            self.calls = 0
+
+        def recognize(self, png):
+            self.calls += 1
+            if self.calls == 1:
+                return r'f(x) = C'
+            elif self.calls == 2:
+                return r'K ='
+            else:
+                return r'2 ^ { - \frac { 2 } { 3 } }'
+
+    with pymupdf.open() as doc:
+        p = doc.new_page(width=500, height=400)
+        # Line 1: left completed equation, prose, right trailing K=
+        p.insert_text((40, 60), 'f(x) = C')
+        p.insert_text((110, 60), ' on the branch of the initial point. The condition gives ')
+        p.insert_text((420, 60), 'K =')
+
+        # Line 2: wrapped RHS at left margin, followed by prose
+        p.insert_text((40, 76), '2')
+        p.insert_text((46, 73), '-', fontsize=6)
+        p.insert_text((51, 71), '2', fontsize=6)
+        p.insert_text((51, 76), '3', fontsize=6)
+        p.draw_line((51, 73), (56, 73))
+        p.insert_text((60, 76), '. Cubing both sides yields the final equation.')
+        doc.save(path)
+
+    pages = optional_load(path, recognizer=DeterministicRecognizer())
+    assert len(pages) == 1
+    page = pages[0]
+
+    # Verify group representation on page
+    assert 'formula_groups' in page
+    assert len(page['formula_groups']) == 1
+    grp = page['formula_groups'][0]
+    assert grp['kind'] == 'wrapped_relation'
+    assert not grp['answer_eligible']
+    assert grp['latex'] == r'K = 2 ^ { - \frac { 2 } { 3 } }'
+
+    chunks = chunk_formula_pages(pages, max_chars=1000)
+    # Finding chunks by formula
+    chunk_by_fid = {}
+    for c in chunks:
+        for f in c.get('formulas', []):
+            chunk_by_fid[f['id']] = c
+
+    # K= and 2^{-2/3} MUST be together in ONE atomic chunk
+    f_k = next(f for f in page['formulas'] if f['id'] == grp['formula_ids'][0])
+    f_rhs = next(f for f in page['formulas'] if f['id'] == grp['formula_ids'][1])
+    f_left = next(f for f in page['formulas'] if 'f(x)' in f['original_text'])
+
+    chunk_k = chunk_by_fid[f_k['id']]
+    chunk_rhs = chunk_by_fid[f_rhs['id']]
+    chunk_left = chunk_by_fid[f_left['id']]
+
+    # K= and RHS must share the EXACT SAME chunk
+    assert chunk_k is chunk_rhs
+    # Completed left equation must be in a DIFFERENT chunk
+    assert chunk_left is not chunk_k
+
+    # Grouped chunk carries both ordered child formulas and provenance intact
+    assert len(chunk_k['formulas']) == 2
+    assert [f['id'] for f in chunk_k['formulas']] == [f_k['id'], f_rhs['id']]
+    assert chunk_k['formulas'][0]['bbox'] == f_k['bbox']
+    assert chunk_k['formulas'][1]['bbox'] == f_rhs['bbox']
+    assert chunk_k['formulas'][0]['source_sha256'] == f_k['source_sha256']
+    assert not chunk_k['answer_eligible']
+
+    # Intervening prose preserved as separate text chunk
+    prose_chunks = [c for c in chunks if 'initial point' in c.get('text', '')]
+    assert len(prose_chunks) == 1
+    assert prose_chunks[0]['formulas'] == []
+
+
+@pytest.mark.parametrize('negative_scenario', [
+    'intervening_prose',
+    'adjacent_columns',
+    'adjacent_cells',
+    'distinct_paragraphs',
+    'complete_equations',
+    'excessive_gap',
+])
+def test_negative_scenarios_reject_relation_grouping(tmp_path, negative_scenario):
+    from src.chunking.text_chunker import chunk_formula_pages
+    path = tmp_path / f'{negative_scenario}.pdf'
+
+    with pymupdf.open() as doc:
+        p = doc.new_page(width=500, height=400)
+        if negative_scenario == 'intervening_prose':
+            p.insert_text((40, 60), 'K =')
+            # Meaningful prose intervenes before formula 2
+            p.insert_text((40, 76), 'is defined as ')
+            p.insert_text((150, 76), '2')
+            p.draw_line((150, 73), (160, 73))
+            p.insert_text((150, 78), '3')
+        elif negative_scenario == 'adjacent_columns':
+            # Column 1 (x: 40..150)
+            p.insert_text((40, 60), 'K =')
+            # Column 2 (x: 250..350)
+            p.insert_text((250, 60), '2')
+            p.draw_line((250, 58), (260, 58))
+            p.insert_text((250, 64), '3')
+        elif negative_scenario == 'adjacent_cells':
+            for x in (50, 150, 250):
+                p.draw_line((x, 50), (x, 150))
+            for y in (50, 100, 150):
+                p.draw_line((50, y), (250, y))
+            p.insert_text((60, 80), 'K =')
+            p.insert_text((60, 130), '2')
+            p.draw_line((60, 128), (70, 128))
+            p.insert_text((60, 134), '3')
+        elif negative_scenario == 'distinct_paragraphs':
+            p.insert_text((40, 60), 'First paragraph ends with K =')
+            # Blank line / separate paragraph with vertical gap
+            p.insert_text((40, 120), '2')
+            p.draw_line((40, 118), (50, 118))
+            p.insert_text((40, 124), '3')
+            p.insert_text((55, 120), 'starts second paragraph.')
+        elif negative_scenario == 'complete_equations':
+            p.insert_text((40, 60), 'x = 1')
+            p.insert_text((40, 76), 'y = 2')
+        elif negative_scenario == 'excessive_gap':
+            p.insert_text((40, 60), 'K =')
+            p.insert_text((40, 250), '2')
+            p.draw_line((40, 248), (50, 248))
+            p.insert_text((40, 254), '3')
+        doc.save(path)
+
+    pages = optional_load(path)
+    assert len(pages) == 1
+    page = pages[0]
+    # No false groups formed
+    assert len(page['formula_groups']) == 0
+    chunks = chunk_formula_pages(pages)
+    for c in chunks:
+        assert len(c.get('formulas', [])) <= 1
+
+
+def test_absent_and_failed_ocr_on_wrapped_relation(tmp_path):
+    from src.chunking.text_chunker import chunk_formula_pages
+    path = tmp_path / 'ocr_states.pdf'
+
+    with pymupdf.open() as doc:
+        p = doc.new_page(width=500, height=400)
+        p.insert_text((40, 60), 'f(x) = C')
+        p.insert_text((110, 60), ' prose separates ')
+        p.insert_text((420, 60), 'K =')
+        p.insert_text((40, 76), '2')
+        p.insert_text((46, 73), '-', fontsize=6)
+        p.insert_text((51, 71), '2', fontsize=6)
+        p.insert_text((51, 76), '3', fontsize=6)
+        p.draw_line((51, 73), (56, 73))
+        p.insert_text((60, 76), '. More prose.')
+        doc.save(path)
+
+    # 1. Native only (absent OCR)
+    native_pages = optional_load(path)
+    native_page = native_pages[0]
+    assert len(native_page['formula_groups']) == 1
+    grp = native_page['formula_groups'][0]
+    assert grp['latex'] is None
+    assert grp['state'] == 'unresolved'
+    assert not grp['answer_eligible']
+    native_chunks = chunk_formula_pages(native_pages)
+    grp_chunk = next(c for c in native_chunks if c.get('formula_groups'))
+    assert grp_chunk['formulas']
+    assert not grp_chunk['answer_eligible']
+    assert r'\[' not in grp_chunk['text']  # no fabricated LaTeX
+
+    # 2. Failed OCR on second child
+    class FailingRecognizer:
+        def __init__(self):
+            self.calls = 0
+        def recognize(self, png):
+            self.calls += 1
+            if self.calls == 1:
+                return r'f(x) = C'
+            elif self.calls == 2:
+                return r'K ='
+            else:
+                raise RuntimeError('synthetic OCR timeout')
+
+    failed_pages = optional_load(path, recognizer=FailingRecognizer())
+    failed_page = failed_pages[0]
+    assert len(failed_page['formula_groups']) == 1
+    failed_grp = failed_page['formula_groups'][0]
+    assert failed_grp['latex'] is None
+    assert failed_grp['state'] == 'unresolved'
+    assert any('synthetic OCR timeout' in str(r) for r in failed_grp['reasons'])
+    failed_chunks = chunk_formula_pages(failed_pages)
+    failed_grp_chunk = next(c for c in failed_chunks if c.get('formula_groups'))
+    assert r'\[' not in failed_grp_chunk['text']  # no fabricated combined LaTeX
