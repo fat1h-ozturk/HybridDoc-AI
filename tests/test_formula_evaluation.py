@@ -102,10 +102,11 @@ def test_synthetic_benchmark_covers_all_five_categories_and_passes(tmp_path):
     # 1. Fraction: complete numerator, denominator, rule, and vertical span
     r_frac = records_by_cat['fraction_num_denom']
     obs_frac = r_frac['observed']
-    assert 'x^2 + 1' in obs_frac['original_text']
+    assert any(p in obs_frac['original_text'] for p in ('x 2 + 1', 'x2 + 1', 'x^2 + 1'))
     assert '2y - 3' in obs_frac['original_text']
     assert obs_frac['rules_count'] >= 1
     assert (obs_frac['bbox'][3] - obs_frac['bbox'][1]) >= 25.0
+    assert obs_frac.get('script_evidence') is True
 
     # 2. Root scope: radical symbol and full radicand
     r_root = records_by_cat['root_scope']
@@ -396,3 +397,106 @@ def test_surrounding_prose_preserved_in_order_without_contamination(tmp_path):
     assert '. Cubing yields.' in full_text
     # Exactly one occurrence of surrounding prose in page blocks
     assert full_text.count('. Cubing yields.') == 1
+
+
+def test_conservative_comparison_benign_forms_pass():
+    """Conservative comparison must pass the two known benign forms:
+
+    1. TeX control-space (\\ ) outside \\text commands
+    2. Redundant braces around a SINGLE exponent/subscript token (t^{2} vs t^2)
+    """
+    gold = r'y(t) = a_{n-1} t^2'
+    # Full candidate with TeX control-space and single-token exponent braces
+    cand = r'y ( t ) = a _ { n - 1 } \ t ^ { 2 }'
+    status, reason = compare_latex_transcription(cand, gold)
+    assert status == 'PASS', f'Expected PASS, got {status}: {reason}'
+
+    # Single-token exponent redundant braces: ^{2} vs ^2, ^{a} vs ^a
+    assert compare_latex_transcription(r'x^{2}', r'x^2')[0] == 'PASS'
+    assert compare_latex_transcription(r'x^2', r'x^{2}')[0] == 'PASS'
+    assert compare_latex_transcription(r'x^{a}', r'x^a')[0] == 'PASS'
+
+    # Single-token subscript redundant braces: _{1} vs _1, _{i} vs _i
+    assert compare_latex_transcription(r'a_{1}', r'a_1')[0] == 'PASS'
+    assert compare_latex_transcription(r'a_{i}', r'a_i')[0] == 'PASS'
+
+    # TeX control-space outside text commands collapses harmlessly
+    assert compare_latex_transcription(r'a\ b', r'a b')[0] == 'PASS'
+    assert compare_latex_transcription(r'x\ + 1', r'x + 1')[0] == 'PASS'
+
+
+def test_conservative_comparison_negative_cases_fail():
+    """Conservative comparison must fail on dropped signs, altered exponents,
+
+    misplaced script scopes, wrong numerators/denominators, root/brace grouping,
+    and bar multiplicity mutations.
+    """
+    gold_script = r'y(t) = a_{n-1} t^2'
+
+    # 1. Dropped minus in n-1
+    assert compare_latex_transcription(r'y(t) = a_{n1} t^2', gold_script)[0] == 'FAIL'
+    assert compare_latex_transcription(r'y(t) = a_{n 1} t^2', gold_script)[0] == 'FAIL'
+
+    # 2. Exponent 2 to 3
+    assert compare_latex_transcription(r'y(t) = a_{n-1} t^3', gold_script)[0] == 'FAIL'
+
+    # 3. Misplaced script scope
+    assert compare_latex_transcription(r'y(t) = a_{n}-1 t^2', gold_script)[0] == 'FAIL'
+    assert compare_latex_transcription(r'y(t) = a_{n-1 t^2}', gold_script)[0] == 'FAIL'
+
+    # 4. Wrong numerator / denominator
+    gold_frac = r'f(x) = \frac{x^2 + 1}{2y - 3}'
+    assert compare_latex_transcription(r'f(x) = \frac{x^2}{2y - 3}', gold_frac)[0] == 'FAIL'
+    assert compare_latex_transcription(r'f(x) = \frac{x^2 + 1}{2y}', gold_frac)[0] == 'FAIL'
+    assert compare_latex_transcription(r'f(x) = \frac{x^3 + 1}{2y - 3}', gold_frac)[0] == 'FAIL'
+
+    # 5. Root / braces grouping
+    gold_root = r'z = \sqrt{u + v}'
+    assert compare_latex_transcription(r'z = \sqrt{u} + v', gold_root)[0] == 'FAIL'
+    assert compare_latex_transcription(r'z = \sqrt{u + v} + w', r'z = \sqrt{u + v + w}')[0] == 'FAIL'
+
+    # 6. Bar multiplicity
+    gold_abs = r'|x + 1| = 5'
+    assert compare_latex_transcription(r'||x + 1|| = 5', gold_abs)[0] == 'FAIL'
+
+    # 7. Multi-token exponent braces must be preserved (grouping semantics)
+    assert normalize_latex(r't^{2n}') == r't^{2n}'
+    assert normalize_latex(r't^2n') == r't^2n'
+    assert compare_latex_transcription(r't^2n', r't^{2n}')[0] == 'FAIL'
+
+    # 8. Negative / fractional exponent braces preserved
+    assert normalize_latex(r'2^{-1}') == r'2^{ - 1}'
+    assert normalize_latex(r'2^-1') == r'2^ - 1'
+    assert compare_latex_transcription(r'2^-1', r'2^{-1}')[0] == 'FAIL'
+
+    # 9. Literal symbol braces preserved (not stripped)
+    assert r'\{' in normalize_latex(r'\{x\}')
+    assert r'\}' in normalize_latex(r'\{x\}')
+
+
+def test_syn_frac_raised_superscript_geometry_and_crop(tmp_path):
+    """SYN-FRAC source fixture renders mathematical raised 2 and preserves geometry."""
+    pdf_path = tmp_path / 'syn_frac_test.pdf'
+    create_synthetic_benchmark_pdf(pdf_path)
+
+    pages = load_pdf_formulas(pdf_path)
+    frac = next((f for f in pages[0]['formulas'] if any(p in f.get('original_text', '') for p in ('x 2 + 1', 'x2 + 1'))), None)
+    assert frac is not None, 'SYN-FRAC formula not found in extracted pages'
+
+    # Raised 2 script evidence detected
+    assert frac['native_script_evidence'] is True
+    # Division rule present
+    assert len(frac['native_rules']) >= 1
+    # Bounding box covers numerator (with raised 2 at y~66), division rule (y=74), and denominator (y=85)
+    box = frac['bbox']
+    assert box[1] <= 55.0, f'Expected y0 <= 55 to include raised 2, got {box[1]}'
+    assert box[3] >= 88.0, f'Expected y1 >= 88 to include denominator, got {box[3]}'
+    assert (box[3] - box[1]) >= 25.0, f'Expected vertical span >= 25.0, got {box[3] - box[1]}'
+
+    # Crop rendering produces valid non-empty pixmap
+    doc = pymupdf.open(pdf_path)
+    page = doc[0]
+    pix = page.get_pixmap(clip=pymupdf.Rect(box), dpi=150)
+    assert pix.width > 50
+    assert pix.height > 30
+    doc.close()
