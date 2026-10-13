@@ -6,7 +6,7 @@ import pymupdf
 def _math_text(text, font):
     return ('math' in font.lower() or any(0x1D400 <= ord(c) <= 0x1D7FF for c in text)
             or any(c in text for c in '√∂∫∑∏′″‴')
-            or bool(re.search(r"[A-Za-z0-9)](?:['′″])*\s*[=≠]", text)))
+            or bool(re.search(r"[A-Za-z0-9)|\]\}](?:['′″])*\s*[=≠≤≥≈<>]", text)))
 
 
 def _near(a, b, size):
@@ -107,7 +107,7 @@ def propose_regions(page):
     for rule, cell in rules:
         above, below = [], []
         for i, s in enumerate(spans):
-            if s['cell'] != cell or len(s['text'].strip()) > 12:
+            if s['cell'] != cell or (not s['math'] and len(s['text'].strip()) > 35):
                 continue
             box = s['bbox']
             if box.x0 < rule.x1 and box.x1 > rule.x0:
@@ -150,7 +150,7 @@ def propose_regions(page):
             if r['cell']:
                 inside = r['bbox'].contains(s['bbox'])
             else:
-                inside = (s['cell'] is None and len(s['text'].strip()) <= 8 and
+                inside = (s['cell'] is None and (s['math'] or len(s['text'].strip()) <= 30) and
                           _near(r['bbox'], s['bbox'], r['size']) and
                           not _has_omitted_interval(r, {'span_ids': {i}, 'bbox': s['bbox']}, spans))
             if inside:

@@ -187,6 +187,44 @@ taşır. Sayfa görüntüsü kaynak kanıtıdır, aday LaTeX'in doğruluk sertif
 değildir. Bu özellik yalnızca ilişkisel kaynak bağlamını korur; eksiksiz bir PDF soru-cevap
 sistemi kurmaz.
 
+### Çevrimdışı Formül Regresyon ve Değerlendirme
+
+Çevrimdışı, model indirme veya API gerektirmeyen deterministik formül değerlendirme komutu mevcuttur. 5 temel regresyon kategorisini (kesir pay/payda tam kapsamı, kök vinculum kapsamı, üst/alt simge, tekil mutlak değer çubukları ve satır sonu ilişkisel formül devamları) yalnızca alt dize varlığıyla değil, tam ifade ve grup bütünlüğüyle (`complete expression/group preservation`) test eder.
+
+Komut satırı kullanımı (varsayılan olarak herkese açık sentetik benchmark çalışır):
+
+```bash
+python -m src.evaluation.evaluate_formulas
+```
+
+JSON rapor çıktısı alma veya belirli bir PDF çalıştırma:
+
+```bash
+python -m src.evaluation.evaluate_formulas --output eval_report.json
+python -m src.evaluation.evaluate_formulas --pdf belge.pdf --output eval_report.json
+```
+
+İsteğe bağlı olarak yerel model önbelleğiyle çalıştırma:
+
+```bash
+python -m src.evaluation.evaluate_formulas --recognize --cache-dir .cache/formulas
+```
+
+Python kullanımı:
+
+```python
+from src.evaluation.evaluate_formulas import evaluate_formula_cases, format_evaluation_report
+
+results = evaluate_formula_cases()
+print(format_evaluation_report(results))
+```
+
+#### Güven Sözleşmesi ve Sınırlamalar
+- **Deterministik Fixture/Stub ile Gerçek Model Ayrımı:** Varsayılan değerlendirme ve birim testler deterministik stub/fixture kullanır; bu testler çıkarma geometrisini, sınırları ve grup mantığını doğrular, gerçek sinirsel OCR model doğruluğunu kanıtlamaz veya sertifikalamaz. Canlı tanıma çıktısı yalnızca `--recognize` bayrağı ile değerlendirilir.
+- **Ayrı Sayım Metrikleri:** Komut her vaka için beklenen ve gözlemlenen bileşenleri detaylandırır; ayrı `PASS`, `FAIL`, `AMBIGUOUS` ve `UNMEASURED` sayaçları üretir.
+- **Cevap Uygunluğu Değişmezliği:** Sentetik benchmark'ta tüm adaylar `answer_eligible=false` ve `detection_status=native_heuristic_incomplete` sözleşmesini korur. Başarılı sentetik eşleşmeler üretim formüllerini kesin gerçek olarak onaylamaz.
+- **İzole Sentetik Veri:** Değerlendirme yalnızca açık sentetik test geometrileri kullanır; özel PDF yolları veya koordinatları repoya veya CI'a dahil edilmez.
+
 ## Çevrimdışı Anahtar Kelime Kaynak Arama (BM25 Source Search)
 
 Harici model indirme, API veya vektör veritabanı gerektirmeyen, Python standart kütüphanesiyle çalışan deterministik Okapi BM25 sözlüksel arama bileşeni mevcuttur. Belgedeki düz yazı parçalarını ve formül bileşen metinlerini indeksleyerek ilgili kaynak sayfaları ve parçaları sıralar.

@@ -183,7 +183,7 @@ def load_pdf_formulas(file_path, *, recognizer=None):
         if recognizer:
             for f, page_idx, review_required in sorted(pending, key=lambda p: ('√' not in p[0]['original_text'], '=' not in p[0]['original_text'])):
                 stripped = f['original_text'].strip()
-                if len(stripped) < 2 or (len(stripped) < 3 and not any(op in stripped for op in _RELATIONAL_OPS)):
+                if f['id'] not in group_by_f_id and (len(stripped) < 2 or (len(stripped) < 3 and not any(op in stripped for op in _RELATIONAL_OPS))):
                     f['reason'] = 'isolated_math_reference_requires_review'
                     continue
                 try:
