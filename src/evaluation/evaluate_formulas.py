@@ -9,11 +9,13 @@ testing complete expression/group preservation across 5 core categories:
 5. Wrapped relation groups across line breaks
 
 Explicitly distinguishes deterministic fixture/stub tests from actual OCR model accuracy.
+Separates geometry/candidate routing from transcription fidelity.
 Never uses private document paths or coordinates.
 """
 import argparse
 import json
 from pathlib import Path
+import re
 import sys
 import tempfile
 import pymupdf
@@ -93,10 +95,73 @@ class BenchmarkStubRecognizer:
         return r'\text{stub}'
 
 
-def evaluate_synthetic_benchmark(pages, is_stub=True):
+def normalize_latex(text: str) -> str:
+    """Conservative harmless LaTeX formatting normalization for fidelity comparison.
+
+    Normalizes math delimiters, whitespace, and spacing around LaTeX tokens,
+    while strictly preserving meaning-sensitive characters: roots, bars, braces,
+    subscripts, exponents, operators, and signs.
+    """
+    if not text:
+        return ''
+    s = text.strip()
+    # Strip wrapping display/inline math delimiters
+    if s.startswith(r'\[') and s.endswith(r'\]') and len(s) >= 4:
+        s = s[2:-2].strip()
+    elif s.startswith(r'\(') and s.endswith(r'\)') and len(s) >= 4:
+        s = s[2:-2].strip()
+    elif s.startswith('$$') and s.endswith('$$') and len(s) >= 4:
+        s = s[2:-2].strip()
+    elif s.startswith('$') and s.endswith('$') and len(s) >= 2:
+        s = s[1:-1].strip()
+
+    # 1. Remove space between command and brace: e.g. \frac { -> \frac{, \sqrt { -> \sqrt{
+    s = re.sub(r'(\\[a-zA-Z]+)\s+\{', r'\1{', s)
+    # 2. Remove space inside braces: { x } -> {x}
+    s = re.sub(r'\{\s+', '{', s)
+    s = re.sub(r'\s+\}', '}', s)
+    # 3. Remove space between consecutive braces: } { -> }{
+    s = re.sub(r'\}\s+\{', '}{', s)
+    # 4. Remove space around sub/superscripts: _ { -> _{, ^ { -> ^{
+    s = re.sub(r'\s*\^\s*', '^', s)
+    s = re.sub(r'\s*_\s*', '_', s)
+    # 5. Remove spaces inside parentheses and around absolute bars:
+    s = re.sub(r'\s*\(\s*', '(', s)
+    s = re.sub(r'\s*\)\s*', ')', s)
+    s = re.sub(r'\|\s+', '|', s)
+    s = re.sub(r'\s+\|', '|', s)
+    # 6. Normalize spacing around relational and arithmetic operators to single space:
+    s = re.sub(r'\s*([=+\-*/])\s*', r' \1 ', s)
+    # 7. Normalize digit-variable spacing in math: 2 y -> 2y
+    s = re.sub(r'([0-9])\s+([a-zA-Z])', r'\1\2', s)
+    # 8. Normalize whitespace inside text command if present: \text { -> \text{
+    s = re.sub(r'\\text\s*\{', r'\\text{', s)
+    # 9. Collapse all remaining whitespace sequences to single space
+    s = re.sub(r'\s+', ' ', s)
+    return s.strip()
+
+
+def compare_latex_transcription(candidate: str, expected_gold: str) -> tuple:
+    """Compare candidate LaTeX against gold LaTeX using conservative normalization.
+
+    Returns (status, reason):
+    - status: 'PASS' | 'FAIL' | 'UNMEASURED'
+    - reason: description
+    """
+    if candidate is None or not candidate.strip():
+        return 'UNMEASURED', 'no transcription candidate returned by recognizer'
+    norm_c = normalize_latex(candidate)
+    norm_g = normalize_latex(expected_gold)
+    if norm_c == norm_g:
+        return 'PASS', 'transcription matches gold expression'
+    return 'FAIL', f'transcription mismatch: candidate {repr(candidate)} != gold {repr(expected_gold)}'
+
+
+def evaluate_synthetic_benchmark(pages, is_stub=True, provenance='stub'):
     """Evaluate extracted pages against the 5 synthetic regression criteria.
 
-    Tests complete expression and group preservation, not only substring presence.
+    Explicitly separates geometry / candidate routing from transcription fidelity.
+    Default offline / stub mode marks transcription as UNMEASURED.
     """
     page = pages[0]
     formulas = page.get('formulas', [])
@@ -115,31 +180,47 @@ def evaluate_synthetic_benchmark(pages, is_stub=True):
         has_denom = '2y - 3' in frac_formula['original_text']
         has_rule = len(frac_formula.get('native_rules', [])) >= 1
         box = frac_formula['bbox']
-        # Vertical extent must span both lines (height >= 25 pt)
         has_span = (box[3] - box[1]) >= 25.0
-        passed = has_num and has_denom and has_rule and has_span
+        g_pass = has_num and has_denom and has_rule and has_span
+        g_status = 'PASS' if g_pass else 'FAIL'
+        g_reason = 'complete numerator, denominator, rule, and vertical bounds preserved' if g_pass else 'incomplete fraction preservation'
         observed = {
             'formula_id': frac_formula['id'],
-            'original_text': frac_formula['original_text'],
+            'page': frac_formula.get('page_number', 1),
             'bbox': frac_formula['bbox'],
+            'original_text': frac_formula['original_text'],
             'rules_count': len(frac_formula.get('native_rules', [])),
             'latex': frac_formula.get('latex'),
             'state': frac_formula.get('state'),
+            'answer_eligible': frac_formula.get('answer_eligible', False),
+            'reason': frac_formula.get('reason'),
         }
-        status = 'PASS' if passed else 'FAIL'
-        reason = 'complete numerator, denominator, rule, and vertical bounds preserved' if passed else 'incomplete fraction preservation'
+        if is_stub:
+            t_status = 'UNMEASURED'
+            t_reason = 'offline default mode; recognizer stub does not measure transcription fidelity'
+        elif frac_formula.get('latex'):
+            t_status, t_reason = compare_latex_transcription(frac_formula['latex'], expected_frac['expression'])
+        else:
+            t_status = 'UNMEASURED'
+            t_reason = f"crop recognition unavailable or timed out: {frac_formula.get('reason')}"
     else:
         observed = None
-        status = 'FAIL'
-        reason = 'fraction formula region not proposed'
+        g_status = 'FAIL'
+        g_reason = 'fraction formula region not proposed'
+        t_status = 'UNMEASURED'
+        t_reason = 'crop missing: fraction formula region not proposed'
+
     records.append({
         'case_id': 'SYN-FRAC',
         'category': 'fraction_num_denom',
         'description': 'Complete fraction preservation (numerator, denominator, division rule)',
+        'provenance': provenance,
+        'geometry_status': g_status,
+        'geometry_reason': g_reason,
+        'transcription_status': t_status,
+        'transcription_reason': t_reason,
         'expected': expected_frac,
         'observed': observed,
-        'status': status,
-        'reason': reason,
     })
 
     # 2. SYN-ROOT: Root Scope
@@ -151,28 +232,45 @@ def evaluate_synthetic_benchmark(pages, is_stub=True):
     if root_formula:
         has_sym = '√' in root_formula['original_text']
         has_radicand = 'u + v' in root_formula['original_text']
-        passed = has_sym and has_radicand
+        g_pass = has_sym and has_radicand
+        g_status = 'PASS' if g_pass else 'FAIL'
+        g_reason = 'radical vinculum scope completely encloses radicand u + v' if g_pass else 'radicand truncated or detached from radical'
         observed = {
             'formula_id': root_formula['id'],
-            'original_text': root_formula['original_text'],
+            'page': root_formula.get('page_number', 1),
             'bbox': root_formula['bbox'],
+            'original_text': root_formula['original_text'],
             'latex': root_formula.get('latex'),
             'state': root_formula.get('state'),
+            'answer_eligible': root_formula.get('answer_eligible', False),
+            'reason': root_formula.get('reason'),
         }
-        status = 'PASS' if passed else 'FAIL'
-        reason = 'radical vinculum scope completely encloses radicand u + v' if passed else 'radicand truncated or detached from radical'
+        if is_stub:
+            t_status = 'UNMEASURED'
+            t_reason = 'offline default mode; recognizer stub does not measure transcription fidelity'
+        elif root_formula.get('latex'):
+            t_status, t_reason = compare_latex_transcription(root_formula['latex'], expected_root['expression'])
+        else:
+            t_status = 'UNMEASURED'
+            t_reason = f"crop recognition unavailable or timed out: {root_formula.get('reason')}"
     else:
         observed = None
-        status = 'FAIL'
-        reason = 'root formula region not proposed'
+        g_status = 'FAIL'
+        g_reason = 'root formula region not proposed'
+        t_status = 'UNMEASURED'
+        t_reason = 'crop missing: root formula region not proposed'
+
     records.append({
         'case_id': 'SYN-ROOT',
         'category': 'root_scope',
         'description': 'Root vinculum scope preserves full radicand expression',
+        'provenance': provenance,
+        'geometry_status': g_status,
+        'geometry_reason': g_reason,
+        'transcription_status': t_status,
+        'transcription_reason': t_reason,
         'expected': expected_root,
         'observed': observed,
-        'status': status,
-        'reason': reason,
     })
 
     # 3. SYN-SCRIPT: Superscript and Subscript
@@ -186,29 +284,46 @@ def evaluate_synthetic_benchmark(pages, is_stub=True):
         has_sub = 'n-1' in orig
         has_sup = '2' in orig
         has_evidence = bool(script_formula.get('native_script_evidence'))
-        passed = has_sub and has_sup and has_evidence
+        g_pass = has_sub and has_sup and has_evidence
+        g_status = 'PASS' if g_pass else 'FAIL'
+        g_reason = 'base characters with subscript and superscript preserved with script evidence' if g_pass else 'scripts missing or script evidence absent'
         observed = {
             'formula_id': script_formula['id'],
-            'original_text': script_formula['original_text'],
+            'page': script_formula.get('page_number', 1),
             'bbox': script_formula['bbox'],
+            'original_text': script_formula['original_text'],
             'script_evidence': script_formula.get('native_script_evidence'),
             'latex': script_formula.get('latex'),
             'state': script_formula.get('state'),
+            'answer_eligible': script_formula.get('answer_eligible', False),
+            'reason': script_formula.get('reason'),
         }
-        status = 'PASS' if passed else 'FAIL'
-        reason = 'base characters with subscript and superscript preserved with script evidence' if passed else 'scripts missing or script evidence absent'
+        if is_stub:
+            t_status = 'UNMEASURED'
+            t_reason = 'offline default mode; recognizer stub does not measure transcription fidelity'
+        elif script_formula.get('latex'):
+            t_status, t_reason = compare_latex_transcription(script_formula['latex'], expected_script['expression'])
+        else:
+            t_status = 'UNMEASURED'
+            t_reason = f"crop recognition unavailable or timed out: {script_formula.get('reason')}"
     else:
         observed = None
-        status = 'FAIL'
-        reason = 'script formula region not proposed'
+        g_status = 'FAIL'
+        g_reason = 'script formula region not proposed'
+        t_status = 'UNMEASURED'
+        t_reason = 'crop missing: script formula region not proposed'
+
     records.append({
         'case_id': 'SYN-SCRIPT',
         'category': 'superscript_subscript',
         'description': 'Complete expression preservation of base with subscript and superscript',
+        'provenance': provenance,
+        'geometry_status': g_status,
+        'geometry_reason': g_reason,
+        'transcription_status': t_status,
+        'transcription_reason': t_reason,
         'expected': expected_script,
         'observed': observed,
-        'status': status,
-        'reason': reason,
     })
 
     # 4. SYN-ABS: Single Absolute-Value Bars
@@ -221,28 +336,45 @@ def evaluate_synthetic_benchmark(pages, is_stub=True):
         orig = abs_formula['original_text']
         has_open = orig.startswith('|') or '|x' in orig
         has_close = '| = 5' in orig or orig.endswith('|') or '|' in orig.split('=')[0]
-        passed = has_open and has_close and '= 5' in orig
+        g_pass = has_open and has_close and '= 5' in orig
+        g_status = 'PASS' if g_pass else 'FAIL'
+        g_reason = 'both opening and closing single absolute-value bars preserved with relation' if g_pass else 'absolute-value bars dropped or truncated'
         observed = {
             'formula_id': abs_formula['id'],
-            'original_text': abs_formula['original_text'],
+            'page': abs_formula.get('page_number', 1),
             'bbox': abs_formula['bbox'],
+            'original_text': abs_formula['original_text'],
             'latex': abs_formula.get('latex'),
             'state': abs_formula.get('state'),
+            'answer_eligible': abs_formula.get('answer_eligible', False),
+            'reason': abs_formula.get('reason'),
         }
-        status = 'PASS' if passed else 'FAIL'
-        reason = 'both opening and closing single absolute-value bars preserved with relation' if passed else 'absolute-value bars dropped or truncated'
+        if is_stub:
+            t_status = 'UNMEASURED'
+            t_reason = 'offline default mode; recognizer stub does not measure transcription fidelity'
+        elif abs_formula.get('latex'):
+            t_status, t_reason = compare_latex_transcription(abs_formula['latex'], expected_abs['expression'])
+        else:
+            t_status = 'UNMEASURED'
+            t_reason = f"crop recognition unavailable or timed out: {abs_formula.get('reason')}"
     else:
         observed = None
-        status = 'FAIL'
-        reason = 'absolute-value formula region not proposed'
+        g_status = 'FAIL'
+        g_reason = 'absolute-value formula region not proposed'
+        t_status = 'UNMEASURED'
+        t_reason = 'crop missing: absolute-value formula region not proposed'
+
     records.append({
         'case_id': 'SYN-ABS',
         'category': 'single_abs_bars',
         'description': 'Single absolute-value bars preserved on both boundaries of enclosed expression',
+        'provenance': provenance,
+        'geometry_status': g_status,
+        'geometry_reason': g_reason,
+        'transcription_status': t_status,
+        'transcription_reason': t_reason,
         'expected': expected_abs,
         'observed': observed,
-        'status': status,
-        'reason': reason,
     })
 
     # 5. SYN-WRAP: Wrapped Relation Group
@@ -258,44 +390,96 @@ def evaluate_synthetic_benchmark(pages, is_stub=True):
         child_formulas = [f for f in formulas if f['id'] in f_ids]
         has_k = any('K' in f.get('original_text', '') and '=' in f.get('original_text', '') for f in child_formulas)
         has_rhs = any(any(c in f.get('original_text', '') for c in ('2', '3')) for f in child_formulas)
-        passed = has_two and has_k and has_rhs and wrap_group['kind'] == 'wrapped_relation'
+        no_prose = not any(w in wrap_group.get('original_text', '') for w in ('Cubing', 'g( )'))
+        g_pass = has_two and has_k and has_rhs and wrap_group['kind'] == 'wrapped_relation' and no_prose
+        g_status = 'PASS' if g_pass else 'FAIL'
+        g_reason = ('line-wrapped relational fragments grouped into unified formula group without contamination'
+                    if g_pass else 'wrapped relation not properly linked or contaminated by prose')
         observed = {
             'group_id': wrap_group['id'],
             'kind': wrap_group['kind'],
+            'page': wrap_group.get('page_number', 1),
             'formula_ids': f_ids,
+            'child_bboxes': [f['bbox'] for f in child_formulas],
             'original_text': wrap_group['original_text'],
             'latex': wrap_group.get('latex'),
             'state': wrap_group.get('state'),
-            'answer_eligible': wrap_group.get('answer_eligible'),
+            'answer_eligible': wrap_group.get('answer_eligible', False),
+            'reasons': wrap_group.get('reasons'),
         }
-        status = 'PASS' if passed else 'FAIL'
-        reason = 'line-wrapped relational fragments grouped into unified formula group without cross-line bounding box merger' if passed else 'wrapped relation not properly linked'
+        if is_stub:
+            t_status = 'UNMEASURED'
+            t_reason = 'offline default mode; recognizer stub does not measure transcription fidelity'
+        elif wrap_group.get('latex'):
+            t_status, t_reason = compare_latex_transcription(wrap_group['latex'], expected_wrap['expression'])
+        else:
+            t_status = 'UNMEASURED'
+            t_reason = f"crop recognition unavailable or timed out: {wrap_group.get('reasons')}"
     else:
         observed = None
-        status = 'FAIL'
-        reason = 'wrapped relation group not formed'
+        g_status = 'FAIL'
+        g_reason = 'wrapped relation group not formed'
+        t_status = 'UNMEASURED'
+        t_reason = 'crop missing: wrapped relation group not formed'
+
     records.append({
         'case_id': 'SYN-WRAP',
         'category': 'wrapped_relation',
         'description': 'Wrapped relational continuation grouped into unified group while preserving prose order',
+        'provenance': provenance,
+        'geometry_status': g_status,
+        'geometry_reason': g_reason,
+        'transcription_status': t_status,
+        'transcription_reason': t_reason,
         'expected': expected_wrap,
         'observed': observed,
-        'status': status,
-        'reason': reason,
     })
 
     # Separate counts
+    g_pass_count = sum(1 for r in records if r['geometry_status'] == 'PASS')
+    g_fail_count = sum(1 for r in records if r['geometry_status'] == 'FAIL')
+    t_pass_count = sum(1 for r in records if r['transcription_status'] == 'PASS')
+    t_fail_count = sum(1 for r in records if r['transcription_status'] == 'FAIL')
+    t_ambig_count = sum(1 for r in records if r['transcription_status'] == 'AMBIGUOUS')
+    t_unmeas_count = sum(1 for r in records if r['transcription_status'] == 'UNMEASURED')
+
     counts = {
         'total': len(records),
-        'pass': sum(1 for r in records if r['status'] == 'PASS'),
-        'fail': sum(1 for r in records if r['status'] == 'FAIL'),
-        'ambiguous': sum(1 for r in records if r['status'] == 'AMBIGUOUS'),
-        'unmeasured': sum(1 for r in records if r['status'] == 'UNMEASURED'),
+        'geometry': {
+            'total': len(records),
+            'pass': g_pass_count,
+            'fail': g_fail_count,
+        },
+        'transcription': {
+            'total': len(records),
+            'pass': t_pass_count,
+            'fail': t_fail_count,
+            'ambiguous': t_ambig_count,
+            'unmeasured': t_unmeas_count,
+        },
+        'geometry_pass': g_pass_count,
+        'geometry_fail': g_fail_count,
+        'transcription_pass': t_pass_count,
+        'transcription_fail': t_fail_count,
+        'transcription_ambiguous': t_ambig_count,
+        'transcription_unmeasured': t_unmeas_count,
+        # Default flat fields
+        'pass': t_pass_count if not is_stub else 0,
+        'fail': g_fail_count + (t_fail_count if not is_stub else 0),
+        'ambiguous': t_ambig_count,
+        'unmeasured': t_unmeas_count,
     }
 
-    mode_label = 'DETERMINISTIC FIXTURE / RECOGNIZER-STUB' if is_stub else 'ACTUAL OCR MODEL EVALUATION'
+    if is_stub:
+        mode_label = 'DETERMINISTIC FIXTURE / RECOGNIZER-STUB'
+    elif provenance == 'controlled_double':
+        mode_label = 'CONTROLLED RECOGNIZER DOUBLE EVALUATION'
+    else:
+        mode_label = 'ACTUAL OCR MODEL EVALUATION'
+
     return {
         'mode': mode_label,
+        'provenance': provenance,
         'is_stub': is_stub,
         'note': 'This evaluation measures deterministic extraction, geometry grouping, and candidate routing. It does not certify end-to-end OCR model accuracy or authorize production formula answers.',
         'counts': counts,
@@ -308,51 +492,76 @@ def format_evaluation_report(results):
     lines = []
     lines.append('=' * 80)
     lines.append('FORMULA REGRESSION EVALUATION REPORT')
-    lines.append(f"Mode: {results['mode']}")
-    lines.append(f"Note: {results['note']}")
+    lines.append(f"Mode:       {results['mode']}")
+    lines.append(f"Provenance: {results.get('provenance', 'unknown')}")
+    lines.append(f"Note:       {results['note']}")
     lines.append('=' * 80)
     lines.append('')
 
     for r in results['records']:
-        lines.append(f"[{r['case_id']}] {r['category']} - Status: {r['status']}")
-        lines.append(f"  Description: {r['description']}")
-        lines.append(f"  Expected:    {json.dumps(r['expected'], ensure_ascii=False)}")
+        lines.append(f"[{r['case_id']}] {r['category']}")
+        lines.append(f"  Description:          {r['description']}")
+        lines.append(f"  Geometry Routing:     {r['geometry_status']} - {r['geometry_reason']}")
+        lines.append(f"  Transcription:        {r['transcription_status']} - {r['transcription_reason']}")
+        lines.append(f"  Expected:             {json.dumps(r['expected'], ensure_ascii=False)}")
         if r['observed']:
-            lines.append(f"  Observed:    {json.dumps(r['observed'], ensure_ascii=False)}")
+            lines.append(f"  Observed:             {json.dumps(r['observed'], ensure_ascii=False)}")
         else:
-            lines.append("  Observed:    None (not detected)")
-        lines.append(f"  Result:      {r['reason']}")
+            lines.append("  Observed:             None (not detected)")
         lines.append('-' * 80)
 
     counts = results['counts']
     lines.append('')
     lines.append('=' * 80)
     lines.append('EVALUATION SUMMARY COUNTS')
-    lines.append(f"  Total Cases: {counts['total']}")
-    lines.append(f"  PASS:        {counts['pass']}")
-    lines.append(f"  FAIL:        {counts['fail']}")
-    lines.append(f"  AMBIGUOUS:   {counts['ambiguous']}")
-    lines.append(f"  UNMEASURED:  {counts['unmeasured']}")
+    lines.append('  Geometry / Candidate Routing:')
+    lines.append(f"    Total Cases: {counts['geometry']['total']}")
+    lines.append(f"    PASS:        {counts['geometry']['pass']}")
+    lines.append(f"    FAIL:        {counts['geometry']['fail']}")
+    lines.append('  Transcription Fidelity:')
+    lines.append(f"    Total Cases: {counts['transcription']['total']}")
+    lines.append(f"    PASS:        {counts['transcription']['pass']}")
+    lines.append(f"    FAIL:        {counts['transcription']['fail']}")
+    lines.append(f"    AMBIGUOUS:   {counts['transcription']['ambiguous']}")
+    lines.append(f"    UNMEASURED:  {counts['transcription']['unmeasured']}")
     lines.append('=' * 80)
     return '\n'.join(lines)
 
 
-def evaluate_formula_cases(pdf_path=None, recognizer=None, is_stub=True):
+def evaluate_formula_cases(pdf_path=None, recognizer=None, is_stub=True, provenance=None):
     """Run formula evaluation on given PDF or generate synthetic benchmark PDF."""
+    if provenance is None:
+        if is_stub:
+            provenance = 'stub'
+        elif getattr(recognizer, '__class__', None).__name__ == 'ControlledRecognizerDouble':
+            provenance = 'controlled_double'
+        elif recognizer is not None:
+            provenance = 'local_formula_recognizer'
+        else:
+            provenance = 'native_only'
+
     if pdf_path is None:
         with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
             tmp_path = Path(tmp.name)
         try:
             create_synthetic_benchmark_pdf(tmp_path)
             stub = recognizer if recognizer is not None else (BenchmarkStubRecognizer() if is_stub else None)
-            pages = load_pdf_formulas(tmp_path, recognizer=stub)
-            return evaluate_synthetic_benchmark(pages, is_stub=is_stub)
+            if hasattr(stub, '__enter__') and hasattr(stub, '__exit__'):
+                with stub as active_rec:
+                    pages = load_pdf_formulas(tmp_path, recognizer=active_rec)
+            else:
+                pages = load_pdf_formulas(tmp_path, recognizer=stub)
+            return evaluate_synthetic_benchmark(pages, is_stub=is_stub, provenance=provenance)
         finally:
             if tmp_path.exists():
                 tmp_path.unlink()
     else:
-        pages = load_pdf_formulas(pdf_path, recognizer=recognizer)
-        return evaluate_synthetic_benchmark(pages, is_stub=is_stub)
+        if hasattr(recognizer, '__enter__') and hasattr(recognizer, '__exit__'):
+            with recognizer as active_rec:
+                pages = load_pdf_formulas(pdf_path, recognizer=active_rec)
+        else:
+            pages = load_pdf_formulas(pdf_path, recognizer=recognizer)
+        return evaluate_synthetic_benchmark(pages, is_stub=is_stub, provenance=provenance)
 
 
 def main(argv=None):
@@ -367,19 +576,31 @@ def main(argv=None):
     parser.add_argument('--json', action='store_true', help='print JSON instead of text report')
     args = parser.parse_args(argv)
 
-    recognizer = None
     is_stub = not args.recognize
+    recognizer = None
+    provenance = 'stub' if is_stub else 'local_formula_recognizer'
+
     if args.recognize:
         from src.ingestion.formula_recognizer import LocalFormulaRecognizer
-        recognizer = LocalFormulaRecognizer(cache_dir=args.cache_dir, timeout_seconds=args.timeout, budget_seconds=args.budget)
+        recognizer = LocalFormulaRecognizer(
+            cache_dir=args.cache_dir,
+            timeout_seconds=args.timeout,
+            budget_seconds=args.budget,
+        )
 
-    results = evaluate_formula_cases(pdf_path=args.pdf, recognizer=recognizer, is_stub=is_stub)
+    results = evaluate_formula_cases(
+        pdf_path=args.pdf,
+        recognizer=recognizer,
+        is_stub=is_stub,
+        provenance=provenance,
+    )
 
+    rendered_json = json.dumps(results, indent=2, ensure_ascii=False)
     if args.output:
-        args.output.write_text(json.dumps(results, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
+        args.output.write_text(rendered_json + '\n', encoding='utf-8')
 
     if args.json:
-        print(json.dumps(results, indent=2, ensure_ascii=False))
+        print(rendered_json)
     else:
         print(format_evaluation_report(results))
 

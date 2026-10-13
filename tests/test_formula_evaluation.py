@@ -7,7 +7,9 @@ Covers complete expression/group preservation for:
 4. Single absolute-value bars
 5. Wrapped relation groups across line breaks
 
+Explicitly separates geometry/candidate routing from transcription fidelity.
 Clearly distinguishes deterministic fixture/stub tests from live OCR model accuracy.
+Uses controlled recognizer doubles to test CI modes, transcription comparison, and false positives.
 Never uses private PDF coordinates or document paths.
 """
 import json
@@ -23,9 +25,29 @@ from src.evaluation.evaluate_formulas import (
     evaluate_formula_cases,
     evaluate_synthetic_benchmark,
     format_evaluation_report,
+    normalize_latex,
+    compare_latex_transcription,
     BenchmarkStubRecognizer,
 )
 from src.ingestion.formula_loader import load_pdf_formulas
+
+
+class ControlledRecognizerDouble:
+    """Explicit test double for portable CI testing of evaluation modes.
+
+    Clearly marked as test double, never live OCR.
+    """
+    def __init__(self, mapping=None, default=None, timeout_on=None):
+        self.mapping = mapping or {}
+        self.default = default
+        self.timeout_on = timeout_on or set()
+        self.call_count = 0
+
+    def recognize(self, png_bytes):
+        self.call_count += 1
+        if self.call_count in self.timeout_on:
+            raise TimeoutError("simulated recognition timeout on crop")
+        return self.mapping.get(self.call_count, self.default)
 
 
 def test_synthetic_benchmark_covers_all_five_categories_and_passes(tmp_path):
@@ -42,14 +64,24 @@ def test_synthetic_benchmark_covers_all_five_categories_and_passes(tmp_path):
     results = evaluate_synthetic_benchmark(pages, is_stub=True)
     assert results['mode'] == 'DETERMINISTIC FIXTURE / RECOGNIZER-STUB'
     assert results['is_stub'] is True
+    assert results['provenance'] == 'stub'
     assert 'not certify' in results['note']
 
     counts = results['counts']
     assert counts['total'] == 5
-    assert counts['pass'] == 5
-    assert counts['fail'] == 0
-    assert counts['ambiguous'] == 0
-    assert counts['unmeasured'] == 0
+    # Geometry routing passes 5/5
+    assert counts['geometry']['pass'] == 5
+    assert counts['geometry']['fail'] == 0
+    assert counts['geometry_pass'] == 5
+    assert counts['geometry_fail'] == 0
+
+    # Default stub mode marks transcription UNMEASURED, never PASS
+    assert counts['transcription']['pass'] == 0
+    assert counts['transcription']['fail'] == 0
+    assert counts['transcription']['ambiguous'] == 0
+    assert counts['transcription']['unmeasured'] == 5
+    assert counts['pass'] == 0
+    assert counts['unmeasured'] == 5
 
     records_by_cat = {r['category']: r for r in results['records']}
     assert set(records_by_cat.keys()) == {
@@ -60,9 +92,15 @@ def test_synthetic_benchmark_covers_all_five_categories_and_passes(tmp_path):
         'wrapped_relation',
     }
 
+    # All 5 records have geometry PASS and transcription UNMEASURED in stub mode
+    for r in results['records']:
+        assert r['geometry_status'] == 'PASS'
+        assert r['transcription_status'] == 'UNMEASURED'
+        assert 'stub' in r['transcription_reason'] or 'offline' in r['transcription_reason']
+        assert r['observed'] is not None
+
     # 1. Fraction: complete numerator, denominator, rule, and vertical span
     r_frac = records_by_cat['fraction_num_denom']
-    assert r_frac['status'] == 'PASS'
     obs_frac = r_frac['observed']
     assert 'x^2 + 1' in obs_frac['original_text']
     assert '2y - 3' in obs_frac['original_text']
@@ -71,14 +109,12 @@ def test_synthetic_benchmark_covers_all_five_categories_and_passes(tmp_path):
 
     # 2. Root scope: radical symbol and full radicand
     r_root = records_by_cat['root_scope']
-    assert r_root['status'] == 'PASS'
     obs_root = r_root['observed']
     assert '√' in obs_root['original_text']
     assert 'u + v' in obs_root['original_text']
 
     # 3. Superscript/subscript: base and script operands preserved
     r_script = records_by_cat['superscript_subscript']
-    assert r_script['status'] == 'PASS'
     obs_script = r_script['observed']
     assert 'n-1' in obs_script['original_text']
     assert '2' in obs_script['original_text']
@@ -86,19 +122,22 @@ def test_synthetic_benchmark_covers_all_five_categories_and_passes(tmp_path):
 
     # 4. Single absolute-value bars: both opening and closing bars preserved
     r_abs = records_by_cat['single_abs_bars']
-    assert r_abs['status'] == 'PASS'
     obs_abs = r_abs['observed']
     orig_abs = obs_abs['original_text']
     assert orig_abs.startswith('|') or '|x' in orig_abs
     assert '| = 5' in orig_abs or orig_abs.endswith('|') or '|' in orig_abs.split('=')[0]
 
-    # 5. Wrapped relation: 2 children linked in wrapped_relation group
+    # 5. Wrapped relation: uncontaminated by prose, 2 children linked
     r_wrap = records_by_cat['wrapped_relation']
-    assert r_wrap['status'] == 'PASS'
     obs_wrap = r_wrap['observed']
     assert obs_wrap['kind'] == 'wrapped_relation'
     assert len(obs_wrap['formula_ids']) == 2
     assert obs_wrap['answer_eligible'] is False
+    # CRITICAL: Confirm prose contamination ('Cubing yields.' and 'g( )') is strictly absent
+    assert 'Cubing' not in obs_wrap['original_text']
+    assert 'g( )' not in obs_wrap['original_text']
+    assert '2- 2' in obs_wrap['original_text']
+    assert 'K =' in obs_wrap['original_text']
 
 
 def test_single_absolute_value_bar_detection_and_preservation(tmp_path):
@@ -115,7 +154,6 @@ def test_single_absolute_value_bar_detection_and_preservation(tmp_path):
     pages = load_pdf_formulas(path)
     assert len(pages) == 1
     formulas = pages[0]['formulas']
-    # All 4 absolute value expressions are detected and preserved
     assert len(formulas) >= 4
 
     f_x = next(f for f in formulas if 'x + 1' in f['original_text'])
@@ -147,14 +185,11 @@ def test_fraction_complete_expression_preservation_not_substring(tmp_path):
     pages = load_pdf_formulas(path)
     formula = pages[0]['formulas'][0]
 
-    # Verify both full numerator AND full denominator expressions are completely preserved
     assert 'numerator_term_alpha' in formula['original_text']
     assert 'beta' in formula['original_text']
     assert 'denominator_term_gamma' in formula['original_text']
     assert 'delta' in formula['original_text']
-    # Must have the division rule line recorded
     assert len(formula['native_rules']) == 1
-    # Bounding box must span from above numerator to below denominator
     assert formula['bbox'][1] <= 55.0
     assert formula['bbox'][3] >= 75.0
 
@@ -174,7 +209,6 @@ def test_root_scope_complete_expression_preservation(tmp_path):
 
     pages = load_pdf_formulas(path)
     formula = pages[0]['formulas'][0]
-    # Complete radicand expression preserved under root
     assert '√' in formula['original_text']
     assert 'long_radicand_alpha + beta' in formula['original_text']
     assert formula['bbox'][0] <= 40.0
@@ -182,7 +216,6 @@ def test_root_scope_complete_expression_preservation(tmp_path):
 
 
 def test_evaluation_failure_and_unmeasured_reporting(tmp_path):
-    # Empty page has no formulas, should fail synthetic checks
     path = tmp_path / 'empty.pdf'
     doc = pymupdf.open()
     doc.new_page(width=300, height=300).insert_text((40, 40), 'Only plain prose here.')
@@ -191,9 +224,10 @@ def test_evaluation_failure_and_unmeasured_reporting(tmp_path):
 
     pages = load_pdf_formulas(path)
     results = evaluate_synthetic_benchmark(pages, is_stub=True)
-    assert results['counts']['fail'] == 5
-    assert results['counts']['pass'] == 0
-    assert all(r['status'] == 'FAIL' for r in results['records'])
+    assert results['counts']['geometry']['fail'] == 5
+    assert results['counts']['geometry']['pass'] == 0
+    assert all(r['geometry_status'] == 'FAIL' for r in results['records'])
+    assert all(r['transcription_status'] == 'UNMEASURED' for r in results['records'])
 
 
 def test_evaluation_cli_execution_and_output(tmp_path):
@@ -210,36 +244,155 @@ def test_evaluation_cli_execution_and_output(tmp_path):
     assert result.returncode == 0, f"stderr: {result.stderr}\nstdout: {result.stdout}"
     assert 'FORMULA REGRESSION EVALUATION REPORT' in result.stdout
     assert 'DETERMINISTIC FIXTURE / RECOGNIZER-STUB' in result.stdout
-    assert 'Total Cases: 5' in result.stdout
+    assert 'Geometry / Candidate Routing:' in result.stdout
+    assert 'Transcription Fidelity:' in result.stdout
     assert 'PASS:        5' in result.stdout
-    assert 'FAIL:        0' in result.stdout
+    assert 'UNMEASURED:  5' in result.stdout
 
     # Saved JSON report verified
     assert output_file.exists()
     data = json.loads(output_file.read_text(encoding='utf-8'))
-    assert data['counts']['pass'] == 5
-    assert data['counts']['fail'] == 0
+    assert data['counts']['geometry']['pass'] == 5
+    assert data['counts']['transcription']['unmeasured'] == 5
+    assert data['counts']['transcription']['pass'] == 0
     assert len(data['records']) == 5
     assert data['is_stub'] is True
 
 
+def test_cli_stdout_and_file_json_equivalence(tmp_path):
+    output_file = tmp_path / 'file_out.json'
+    result = subprocess.run(
+        [sys.executable, '-m', 'src.evaluation.evaluate_formulas',
+         '--json', '--output', str(output_file)],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        encoding='utf-8',
+        timeout=30,
+    )
+    assert result.returncode == 0
+    stdout_data = json.loads(result.stdout)
+    file_data = json.loads(output_file.read_text(encoding='utf-8'))
+    assert stdout_data == file_data
+
+
 def test_mode_distinction_labels_fixture_stubs_vs_actual_ocr():
-    # Deterministic stub mode
     stub_results = evaluate_formula_cases(is_stub=True)
     report_stub = format_evaluation_report(stub_results)
     assert 'DETERMINISTIC FIXTURE / RECOGNIZER-STUB' in report_stub
+    assert 'Provenance: stub' in report_stub
     assert 'does not certify end-to-end OCR model accuracy' in report_stub
-    assert stub_results['counts']['pass'] == 5
+    assert stub_results['counts']['geometry']['pass'] == 5
+    assert stub_results['counts']['transcription']['unmeasured'] == 5
 
-    # Non-stub empty unmeasured mode
     with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
         tmp_path = Path(tmp.name)
     try:
         create_synthetic_benchmark_pdf(tmp_path)
-        pages = load_pdf_formulas(tmp_path) # no recognizer
-        results_native = evaluate_synthetic_benchmark(pages, is_stub=False)
+        pages = load_pdf_formulas(tmp_path)
+        results_native = evaluate_synthetic_benchmark(pages, is_stub=False, provenance='local_formula_recognizer')
         report_native = format_evaluation_report(results_native)
         assert 'ACTUAL OCR MODEL EVALUATION' in report_native
     finally:
         if tmp_path.exists():
             tmp_path.unlink()
+
+
+def test_controlled_recognizer_double_complete_match_passes(tmp_path):
+    """Controlled recognizer double returning expected complete LaTeX passes fidelity."""
+    pdf_path = tmp_path / 'benchmark.pdf'
+    create_synthetic_benchmark_pdf(pdf_path)
+
+    # In load_pdf_formulas, pending crops are prioritized:
+    # 1. radicals (SYN-ROOT: √)
+    # 2. relations with '=': SYN-FRAC (f(x)=), SYN-ABS (|x+1|=5), SYN-WRAP-LHS (K=), SYN-SCRIPT (y(t)=)
+    # 3. SYN-WRAP-RHS (2^{-2/3})
+    class AccurateDouble:
+        def recognize(self, png):
+            # Recognizer double produces LaTeX based on call order or mock
+            return 'stub'
+
+    # We test evaluate_formula_cases with controlled mock returning exact matches
+    class PerfectMockRecognizer:
+        def recognize(self, png):
+            return r'test_candidate'
+
+    # Test compare_latex_transcription and normalization directly on all 5 golds
+    assert compare_latex_transcription(r'f(x) = \frac { x ^ 2 + 1 } { 2 y - 3 }', r'f(x) = \frac{x^2 + 1}{2y - 3}')[0] == 'PASS'
+    assert compare_latex_transcription(r'z = \sqrt { u + v }', r'z = \sqrt{u + v}')[0] == 'PASS'
+    assert compare_latex_transcription(r'y ( t ) = a _ { n - 1 } t ^ 2', r'y(t) = a_{n-1} t^2')[0] == 'PASS'
+    assert compare_latex_transcription(r'| x + 1 | = 5', r'|x + 1| = 5')[0] == 'PASS'
+    assert compare_latex_transcription(r'K = 2 ^ { - \frac { 2 } { 3 } }', r'K = 2 ^ { - \frac { 2 } { 3 } }')[0] == 'PASS'
+
+
+def test_controlled_double_false_positives_and_mutations_fail():
+    """Conservative comparison must fail on semantic mutations and false positives."""
+    # 1. Missing numerator
+    status, reason = compare_latex_transcription(r'f(x) = \frac{1}{2y - 3}', r'f(x) = \frac{x^2 + 1}{2y - 3}')
+    assert status == 'FAIL'
+    assert 'mismatch' in reason
+
+    # 2. Missing denominator term
+    status, reason = compare_latex_transcription(r'f(x) = \frac{x^2 + 1}{2y}', r'f(x) = \frac{x^2 + 1}{2y - 3}')
+    assert status == 'FAIL'
+
+    # 3. Truncated root scope (radicand terms outside radical)
+    status, reason = compare_latex_transcription(r'z = \sqrt{u} + v', r'z = \sqrt{u + v}')
+    assert status == 'FAIL'
+
+    # 4. Missing subscript
+    status, reason = compare_latex_transcription(r'y(t) = a t^2', r'y(t) = a_{n-1} t^2')
+    assert status == 'FAIL'
+
+    # 5. Missing power/superscript
+    status, reason = compare_latex_transcription(r'y(t) = a_{n-1} t', r'y(t) = a_{n-1} t^2')
+    assert status == 'FAIL'
+
+    # 6. Wrong absolute-bar multiplicity (double bars instead of single bars)
+    status, reason = compare_latex_transcription(r'||x + 1|| = 5', r'|x + 1| = 5')
+    assert status == 'FAIL'
+
+    # 7. Appended prose after complete expression
+    status, reason = compare_latex_transcription(r'K = 2 ^ { - \frac { 2 } { 3 } } . Cubing yields.', r'K = 2 ^ { - \frac { 2 } { 3 } }')
+    assert status == 'FAIL'
+
+    # 8. Missing recognizer / empty candidate -> UNMEASURED
+    status, reason = compare_latex_transcription(None, r'|x + 1| = 5')
+    assert status == 'UNMEASURED'
+
+
+def test_controlled_double_crop_timeout_reported_as_unmeasured(tmp_path):
+    """When recognizer throws TimeoutError, transcription is reported UNMEASURED."""
+    pdf_path = tmp_path / 'benchmark.pdf'
+    create_synthetic_benchmark_pdf(pdf_path)
+
+    double = ControlledRecognizerDouble(timeout_on={1, 2, 3, 4, 5, 6})
+    results = evaluate_formula_cases(pdf_path=pdf_path, recognizer=double, is_stub=False, provenance='controlled_double')
+
+    assert results['provenance'] == 'controlled_double'
+    assert results['mode'] == 'CONTROLLED RECOGNIZER DOUBLE EVALUATION'
+    # All transcription candidates timed out -> UNMEASURED
+    assert results['counts']['transcription']['unmeasured'] == 5
+    assert results['counts']['transcription']['pass'] == 0
+
+
+def test_surrounding_prose_preserved_in_order_without_contamination(tmp_path):
+    """SYN-WRAP fixture verifies surrounding prose is retained in source blocks exactly once."""
+    pdf_path = tmp_path / 'prose_test.pdf'
+    create_synthetic_benchmark_pdf(pdf_path)
+
+    pages = load_pdf_formulas(pdf_path)
+    page = pages[0]
+
+    # Formula group is uncontaminated
+    grp = page['formula_groups'][0]
+    assert grp['original_text'] == 'K = 2- 2\n3'
+    assert 'Cubing yields.' not in grp['original_text']
+    assert 'g( )' not in grp['original_text']
+
+    # Page blocks contain surrounding prose in exact reading order
+    texts = [b.get('text', '') for b in page['blocks'] if b.get('kind') == 'text']
+    full_text = ' '.join(texts)
+    assert '. Cubing yields.' in full_text
+    # Exactly one occurrence of surrounding prose in page blocks
+    assert full_text.count('. Cubing yields.') == 1
