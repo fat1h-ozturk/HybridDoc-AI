@@ -187,5 +187,39 @@ taşır. Sayfa görüntüsü kaynak kanıtıdır, aday LaTeX'in doğruluk sertif
 değildir. Bu özellik yalnızca ilişkisel kaynak bağlamını korur; eksiksiz bir PDF soru-cevap
 sistemi kurmaz.
 
+## Çevrimdışı Anahtar Kelime Kaynak Arama (BM25 Source Search)
+
+Harici model indirme, API veya vektör veritabanı gerektirmeyen, Python standart kütüphanesiyle çalışan deterministik Okapi BM25 sözlüksel arama bileşeni mevcuttur. Belgedeki düz yazı parçalarını ve formül bileşen metinlerini indeksleyerek ilgili kaynak sayfaları ve parçaları sıralar.
+
+Kurulumdan bağımsız komut örneği:
+
+```bash
+python -m src.retrieval.search_pdf sample_docs/Fatih_RAG_OCR_Multimodal_PDF_Use_Case.pdf "ayrılabilir diferansiyel" --top-k 3 --output sonuclar.txt
+```
+
+Python kullanımı:
+
+```python
+from src.retrieval.search_pdf import search_pdf, format_search_results
+
+results = search_pdf("belge.pdf", "separable differential equations", top_k=3)
+formatted_output = format_search_results(results, "separable differential equations", file_path="belge.pdf")
+print(formatted_output)
+```
+
+### Özellikler ve Güven Sözleşmesi
+
+- **Deterministik BM25 Sıralaması:** Okapi BM25 formülü standart kütüphane ile işletilir; eşit puanlarda kaynak belge sırası (`source_order`) deterministik olarak korunur. Puanlar bağıl alaka sıralamasıdır; olasılık, kesinlik veya doğruluk skoru değildir.
+- **Sadece Pozitif Eşleşmeler:** Yalnızca pozitif puanlı parçalar döndürülür; eşleşme olmayan sorgularda ilgisiz parçalar listelenmez.
+- **Kanıt Bulunamadı Politikası (*No-Evidence*):** Eşleşme bulunamadığında açıkça eşleşen kaynak bulunamadığı belirtilir. Bu durum, aranan bilginin dokümanda kesinlikle bulunmadığı anlamına gelmez (ör. taranmış görsel sayfalar veya farklı sözcük kullanımı).
+- **Cevap Uygunluğu (*answer_eligible=false*):** Arama bir LLM cevaplayıcı veya formül doğrulayıcı değildir; yalnızca kaynak bağlamını bulur. Tüm parçalarda `answer_eligible=false` ve `detection_status=native_heuristic_incomplete` korunur; arama hiçbir bayrağı tersine çevirmez.
+- **Formül Grupları:** Satır sonu ilişkisel formül devamları (`formula_group`) bölünmez; sıralı çocuk ID'leri, özgün metinleri, bbox'ları ve durumları eksiksiz listelenir.
+- **Çıktı Alanları:** Her sonuç `rank`, `score`, `file_name`, `page_number`, `total_pages`, `chunk_id`, `source_order`, `source_sha256`, `detection_status`, `answer_eligible`, `review_reason`, formül/grup metaverileri ve tam alıntıyı (`excerpt`) taşır. Standart çıktı ile `--output` dosya içeriği birebir eşdeğerdir.
+
+### Sınırlamalar
+
+- **Sözlüksel Eşleştirme:** Çevrimdışı BM25 araması Türkçe sorguları İngilizce belge terimlerine çevirmez ve eş anlamlıları algılamaz. Sorgular belgenin kendi sözcükleriyle yapılmalıdır.
+- **Taranmış Sayfalar:** Yalnızca taranmış/görsel içeren ve dijital metin katmanı olmayan sayfalarda yerel metin çıkarılamadığından eşleşme bulunamaz.
+
 Kontrol: `python -m pytest -q`. Testler herkese açık sentetik PDF geometrisi
 kullanır; özel PDF veya altın koordinatlar repoya dahil değildir.
