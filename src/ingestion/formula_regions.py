@@ -129,6 +129,21 @@ def propose_regions(page):
                                 'size': max(spans[i]['size'] for i in above + below),
                                 'cell': None})
             math_rules.append((rule, cell, set(above + below)))
+        elif not above and below and rule.width < .8 * page.rect.width:
+            # Radical vinculum: horizontal bar following radical symbol covers radicand spans below
+            rad_spans = [i for i, s in enumerate(spans) if '√' in s['text'] and s['bbox'].x0 <= rule.x0 <= s['bbox'].x1 + 15
+                         and abs(s['bbox'].y0 - rule.y0) <= 2.5 * s['size']]
+            if rad_spans:
+                for i in below + rad_spans:
+                    spans[i]['math'] = True
+                if cell is None:
+                    box = pymupdf.Rect(rule.x0, rule.y0-.05, rule.x1, rule.y0+.05)
+                    for i in below + rad_spans:
+                        box |= spans[i]['bbox']
+                    regions.append({'bbox': box, 'span_ids': set(below + rad_spans),
+                                    'size': max(spans[i]['size'] for i in below + rad_spans),
+                                    'cell': None})
+                math_rules.append((rule, cell, set(below + rad_spans)))
     for i, s in enumerate(spans):
         cell = s['cell']
         if not s['math'] or any(i in r['span_ids'] for r in regions):
@@ -150,7 +165,9 @@ def propose_regions(page):
             if r['cell']:
                 inside = r['bbox'].contains(s['bbox'])
             else:
-                inside = (s['cell'] is None and (s['math'] or len(s['text'].strip()) <= 30) and
+                is_operand = (s['math'] or s['script'] or
+                              (len(s['text'].strip()) <= 8 and not any(c.isspace() for c in s['text'].strip())))
+                inside = (s['cell'] is None and is_operand and
                           _near(r['bbox'], s['bbox'], r['size']) and
                           not _has_omitted_interval(r, {'span_ids': {i}, 'bbox': s['bbox']}, spans))
             if inside:
@@ -173,5 +190,10 @@ def propose_regions(page):
                                    for i in r['span_ids'])
         box = r['bbox']
         if not r['cell']:
-            r['bbox'] = pymupdf.Rect(box.x0-2, box.y0-2, box.x1+2, box.y1+2) & page.rect
+            limit_top = max((s['bbox'].y1 for s in spans if s['bbox'].y1 <= box.y0), default=0.0)
+            limit_bottom = min((s['bbox'].y0 for s in spans if s['bbox'].y0 >= box.y1), default=page.rect.y1)
+
+            y0 = max(box.y0 - 2, limit_top)
+            y1 = min(box.y1 + 2, limit_bottom)
+            r['bbox'] = pymupdf.Rect(box.x0 - 2, y0, box.x1 + 2, y1) & page.rect
     return sorted(regions, key=lambda r: min(r['span_ids'])), spans, table_error

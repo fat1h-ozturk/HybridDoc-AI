@@ -189,25 +189,32 @@ sistemi kurmaz.
 
 ### Çevrimdışı Formül Regresyon ve Değerlendirme
 
-Çevrimdışı, model indirme veya API gerektirmeyen deterministik formül değerlendirme komutu mevcuttur. 5 temel regresyon kategorisini (kesir pay/payda tam kapsamı, kök vinculum kapsamı, üst/alt simge, tekil mutlak değer çubukları ve satır sonu ilişkisel formül devamları) yalnızca alt dize varlığıyla değil, tam ifade ve grup bütünlüğüyle (`complete expression/group preservation`) test eder.
+Çevrimdışı, model indirme veya harici API gerektirmeyen deterministik formül değerlendirme komutu mevcuttur. 5 temel regresyon kategorisini (kesir pay/payda tam kapsamı, kök vinculum kapsamı, üst/alt simge, tekil mutlak değer çubukları ve satır sonu ilişkisel formül devamları) geometrik aday yönlendirmesi ve metin kirlenmesi açısından test eder.
 
-Komut satırı kullanımı (varsayılan olarak herkese açık sentetik benchmark çalışır):
+Komut satırı kullanımı (varsayılan çevrimdışı modda herkese açık sentetik benchmark çalışır; geometri yönlendirmesi ölçülür, transkripsiyon UNMEASURED kalır):
 
 ```bash
-python -m src.evaluation.evaluate_formulas
+.venv/bin/python -m src.evaluation.evaluate_formulas
 ```
 
 JSON rapor çıktısı alma veya belirli bir PDF çalıştırma:
 
 ```bash
-python -m src.evaluation.evaluate_formulas --output eval_report.json
-python -m src.evaluation.evaluate_formulas --pdf belge.pdf --output eval_report.json
+.venv/bin/python -m src.evaluation.evaluate_formulas --output eval_report.json
+.venv/bin/python -m src.evaluation.evaluate_formulas --pdf belge.pdf --output eval_report.json
+.venv/bin/python -m src.evaluation.evaluate_formulas --json
 ```
 
-İsteğe bağlı olarak yerel model önbelleğiyle çalıştırma:
+İsteğe bağlı olarak yerel Docling `CodeFormulaV2` modeliyle gerçek OCR transkripsiyon değerlendirmesi çalıştırma (PyTorch ve Docling içeren opsiyonel formül ortamı gereklidir; sistem Python'unda bu kütüphanelerin bulunduğu varsayılmaz):
 
 ```bash
-python -m src.evaluation.evaluate_formulas --recognize --cache-dir .cache/formulas
+# Örnek: var olan formül ortamı ve önbellek dizini ile çalıştırma
+/home/fatih/projects/firstmate/data/hybriddoc-formula-fidelity/ocr-venv/bin/python -m src.evaluation.evaluate_formulas \
+  --recognize \
+  --cache-dir /home/fatih/projects/firstmate/data/hybriddoc-formula-fidelity/model-cache \
+  --timeout 120 \
+  --budget 480 \
+  --output live_eval_report.json
 ```
 
 Python kullanımı:
@@ -220,8 +227,9 @@ print(format_evaluation_report(results))
 ```
 
 #### Güven Sözleşmesi ve Sınırlamalar
-- **Deterministik Fixture/Stub ile Gerçek Model Ayrımı:** Varsayılan değerlendirme ve birim testler deterministik stub/fixture kullanır; bu testler çıkarma geometrisini, sınırları ve grup mantığını doğrular, gerçek sinirsel OCR model doğruluğunu kanıtlamaz veya sertifikalamaz. Canlı tanıma çıktısı yalnızca `--recognize` bayrağı ile değerlendirilir.
-- **Ayrı Sayım Metrikleri:** Komut her vaka için beklenen ve gözlemlenen bileşenleri detaylandırır; ayrı `PASS`, `FAIL`, `AMBIGUOUS` ve `UNMEASURED` sayaçları üretir.
+- **Geometri / Aday Yönlendirmesi ile Transkripsiyon Sadakati Ayrımı:** Varsayılan çevrimdışı komut ve stub testleri yalnızca deterministik çıkarma geometrisini, sınırları ve grup bağlantılarını doğrular (`Geometry Routing: PASS`). Varsayılan modda stub LaTeX çıktıları transkripsiyon doğruluğu iddiasında bulunamaz ve transkripsiyon sadakati açıkça `UNMEASURED` olarak etiketlenir.
+- **Canlı Tanıma ve LaTeX Normalizasyonu:** Gerçek OCR sadakati yalnızca `--recognize` bayrağı ile ölçülür. Tanıma sonuçları altın LaTeX dizeleriyle karşılaştırılırken yalnızca zararsız biçimlendirme ve boşluklar normalize edilir; kökler, mutlak değer çubukları (`|`), üsler, alt indisler ve işlem işaretleri korunur. Normalizasyonla güvenle eşleştirilemeyen durumlar uyumsuzluk (`FAIL`) olarak kaydedilir ve ham çıktılar korunur.
+- **Ayrı Sayım Metrikleri:** Komut çıktısı Geometri Yönlendirmesi ve Transkripsiyon Sadakati için ayrı ayrı `PASS`, `FAIL`, `AMBIGUOUS` ve `UNMEASURED` sayaçları üretir.
 - **Cevap Uygunluğu Değişmezliği:** Sentetik benchmark'ta tüm adaylar `answer_eligible=false` ve `detection_status=native_heuristic_incomplete` sözleşmesini korur. Başarılı sentetik eşleşmeler üretim formüllerini kesin gerçek olarak onaylamaz.
 - **İzole Sentetik Veri:** Değerlendirme yalnızca açık sentetik test geometrileri kullanır; özel PDF yolları veya koordinatları repoya veya CI'a dahil edilmez.
 
