@@ -154,25 +154,38 @@ with LocalFormulaRecognizer(cache_dir=".cache/formulas") as recognizer:
 chunks = chunk_formula_pages(pages, max_chars=1000, overlap=100)
 ```
 
-`chunk_formula_pages` formül ve uyarı bloklarını atomik tutar; bir atomik blok sınırdan
+`chunk_formula_pages` formül, formül grubu ve uyarı bloklarını atomik tutar; bir atomik blok sınırdan
 uzunsa tek, daha büyük parça üretir. Düz yazı blokları karakter/örtüşme
 kurallarını kullanır; formül örtüşmesi yapılmaz. Parçalar kaynak sayfa, hash,
 bbox, özgün metin ve belirsizlik alanlarını korur.
+
+### Satır Sonu İlişki Devamları (Wrapped Relations)
+
+Aynı paragraf ve sayfa bölümünde satır sonundaki eksik bir bağıntı parçası (ör. `K=`)
+fiziksel bir sonraki satırın başında formül devamıyla (ör. `2^{-2/3}`) birleştiğinde,
+kaynak okuma sırası kanıtlarıyla bu iki parça isteğe bağlı `formula_group` bloğu ve
+tek bir atomik parçada bir arada tutulur. Her iki alt formül kaydının bağımsız
+ID'si, bbox'ı, SHA-256'sı, özgün metni ve aday LaTeX'i eksiksiz korunur; uzak kutular
+fiziksel olarak birleştirilmez. Aradaki anlamlı düz yazı, farklı paragraf, sütun veya
+tablo hücreleri bu gruplamayı kesin olarak reddeder.
 
 **Güven sözleşmesi:** Her formül `original_text`, `latex`, `page_number`,
 `bbox`, `source_sha256`, `recognition_status`, `state` ve `reason` taşır.
 Formül bbox'ları döndürülmemiş sayfanın koordinat sistemindedir; özgün bölge
 metni ve tanıma görüntüsü de aynı geometriyle çıkarılır. PDF dosyasının kayıtlı
 sayfa dönüşü değiştirilmez.
+
 `unverified` modelin aday döndürdüğünü; `unresolved` tanıma yapılmadığını,
 başarısız olduğunu veya çizgili kapsam/script bağlantısının kaynak incelemesi gerektirdiğini
-belirtir. İkisi de doğrulanmış gerçek değildir. Yerel detector işaretsiz inline
-matematiği kaçırabilir; bu yüzden tüm sayfalar
+belirtir. İkisi de doğrulanmış gerçek değildir. Model mutlak değer çubukları yerine çift çubuk
+(`\|`) üretebilir veya düz yazı sözcüklerini math-mode harfleri olarak aktarabilir; bu çıktılar
+kusursuz doğru kabul edilmemelidir. Formül grupları da sezgisel aday ilişkilerdir; doğrulanmış denklem
+değildir ve alt tanıma başarısızlığında birleşik geçerli LaTeX uydurulmaz. Yerel detector işaretsiz inline
+matematiği kaçırabilir; bu yüzden tüm sayfalar, formüller, gruplar ve parçalar
 `detection_status=native_heuristic_incomplete` ve `answer_eligible=false`
 taşır. Sayfa görüntüsü kaynak kanıtıdır, aday LaTeX'in doğruluk sertifikası
-değildir. Sonraki cevap katmanı kaynakla ayrıca doğrulanmamış formüle dayanarak
-cevap vermemeli; belirsiz/kaçmış matematikte kaynak incelemesi istemeli veya
-cevaptan kaçınmalıdır. Bu değişiklik henüz cevap/retrieval katmanı kurmaz.
+değildir. Bu özellik yalnızca ilişkisel kaynak bağlamını korur; eksiksiz bir PDF soru-cevap
+sistemi kurmaz.
 
 Kontrol: `python -m pytest -q`. Testler herkese açık sentetik PDF geometrisi
 kullanır; özel PDF veya altın koordinatlar repoya dahil değildir.

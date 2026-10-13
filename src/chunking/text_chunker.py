@@ -44,14 +44,23 @@ def chunk_formula_pages(pages, max_chars=1000, overlap=100):
     chunks = []
     for page in pages:
         formulas = {f['id']: f for f in page['formulas']}
+        groups = {g['id']: g for g in page.get('formula_groups', [])}
         for block in page['blocks']:
             metadata = {**page, 'blocks': [block], 'formulas': []}
+            if 'formula_groups' in metadata:
+                metadata['formula_groups'] = []
             if block['kind'] == 'text':
                 chunks.extend(chunk_pages([{**metadata, 'text': block['text']}],
                                           max_chars, overlap))
             else:
                 if block['kind'] == 'formula':
                     metadata['formulas'] = [formulas[block['formula_id']]]
+                elif block['kind'] == 'formula_group':
+                    metadata['formulas'] = [formulas[fid] for fid in block['formula_ids']]
+                    grp = block.get('group') or groups.get(block.get('group_id'))
+                    if grp:
+                        metadata['formula_groups'] = [grp]
+                        metadata['formula_group'] = grp
                 chunks.append({**metadata, 'text': block['text'],
                                'char_count': len(block['text'])})
     return chunks
