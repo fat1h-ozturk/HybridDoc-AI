@@ -31,7 +31,9 @@ def create_synthetic_benchmark_pdf(pdf_path):
 
     # Case 1: Fraction with numerator and denominator (SYN-FRAC)
     p.insert_text((40, 75), 'f(x) =')
-    p.insert_text((72, 70), 'x^2 + 1')
+    p.insert_text((72, 70), 'x')
+    p.insert_text((79, 66), '2', fontsize=7)
+    p.insert_text((85, 70), '+ 1')
     p.insert_text((72, 85), '2y - 3')
     p.draw_line((70, 74), (110, 74))
 
@@ -80,7 +82,7 @@ class BenchmarkStubRecognizer:
 
     def recognize_for_case(self, formula):
         text = formula.get('original_text', '')
-        if 'x^2 + 1' in text and '2y - 3' in text:
+        if any(p in text for p in ('x 2 + 1', 'x2 + 1', 'x^2 + 1')) and '2y - 3' in text:
             return r'f(x) = \frac{x^2 + 1}{2y - 3}'
         elif '√' in text and 'u + v' in text:
             return r'z = \sqrt{u + v}'
@@ -115,6 +117,12 @@ def normalize_latex(text: str) -> str:
     elif s.startswith('$') and s.endswith('$') and len(s) >= 2:
         s = s[1:-1].strip()
 
+    # Normalize TeX control-space (\ followed by whitespace) outside \text{...}
+    parts = re.split(r'(\\text\{[^{}]*\})', s)
+    for i in range(0, len(parts), 2):
+        parts[i] = re.sub(r'\\\s+', ' ', parts[i])
+    s = ''.join(parts)
+
     # 1. Remove space between command and brace: e.g. \frac { -> \frac{, \sqrt { -> \sqrt{
     s = re.sub(r'(\\[a-zA-Z]+)\s+\{', r'\1{', s)
     # 2. Remove space inside braces: { x } -> {x}
@@ -125,6 +133,10 @@ def normalize_latex(text: str) -> str:
     # 4. Remove space around sub/superscripts: _ { -> _{, ^ { -> ^{
     s = re.sub(r'\s*\^\s*', '^', s)
     s = re.sub(r'\s*_\s*', '_', s)
+    # Normalize redundant braces around a SINGLE exponent/subscript token:
+    # e.g. t^{2} -> t^2, a_{i} -> a_i
+    # strictly single alphanumeric token [0-9a-zA-Z]
+    s = re.sub(r'(?<=[\^_])\{([0-9a-zA-Z])\}', r'\1', s)
     # 5. Remove spaces inside parentheses and around absolute bars:
     s = re.sub(r'\s*\(\s*', '(', s)
     s = re.sub(r'\s*\)\s*', ')', s)
@@ -170,13 +182,13 @@ def evaluate_synthetic_benchmark(pages, is_stub=True, provenance='stub'):
     records = []
 
     # 1. SYN-FRAC: Fraction Numerator/Denominator
-    frac_formula = next((f for f in formulas if 'x^2 + 1' in f.get('original_text', '')), None)
+    frac_formula = next((f for f in formulas if any(p in f.get('original_text', '') for p in ('x 2 + 1', 'x2 + 1', 'x^2 + 1'))), None)
     expected_frac = {
         'components': ['numerator: x^2 + 1', 'denominator: 2y - 3', 'division rule'],
         'expression': r'f(x) = \frac{x^2 + 1}{2y - 3}',
     }
     if frac_formula:
-        has_num = 'x^2 + 1' in frac_formula['original_text']
+        has_num = any(p in frac_formula['original_text'] for p in ('x 2 + 1', 'x2 + 1', 'x^2 + 1'))
         has_denom = '2y - 3' in frac_formula['original_text']
         has_rule = len(frac_formula.get('native_rules', [])) >= 1
         box = frac_formula['bbox']
@@ -190,6 +202,7 @@ def evaluate_synthetic_benchmark(pages, is_stub=True, provenance='stub'):
             'bbox': frac_formula['bbox'],
             'original_text': frac_formula['original_text'],
             'rules_count': len(frac_formula.get('native_rules', [])),
+            'script_evidence': frac_formula.get('native_script_evidence'),
             'latex': frac_formula.get('latex'),
             'state': frac_formula.get('state'),
             'answer_eligible': frac_formula.get('answer_eligible', False),
