@@ -17,8 +17,8 @@ def detect_wrapped_relations(formulas, spans):
     2. Has a non-empty LHS before the relational operator.
     3. Right formula does not start with a relational operator.
     4. Consecutive in source spans (no intervening text or omissions).
-    5. In the same paragraph / rawdict text block (same block_idx).
-    6. Consecutive lines in that block (line_idx_B == line_idx_A + 1).
+    5. Same raw block, or adjacent blocks with aligned paragraph margins.
+    6. Consecutive lines, or the final/first lines of those adjacent blocks.
     7. Neither formula is in a table cell.
     8. Normal line spacing (no excessive vertical gap).
     9. Right formula wraps to the left margin (horizontal wrap: B.x0 < A.x1).
@@ -48,13 +48,30 @@ def detect_wrapped_relations(formulas, spans):
 
         block_a = span_a_last.get('block_idx')
         block_b = span_b_first.get('block_idx')
-        if block_a is None or block_a != block_b:
+        if block_a is None or block_b is None:
             continue
 
         line_a = span_a_last.get('line_idx')
         line_b = span_b_first.get('line_idx')
-        if line_a is None or line_b != line_a + 1:
+        if line_a is None or line_b is None:
             continue
+        if block_a == block_b:
+            if line_b != line_a + 1:
+                continue
+        else:
+            # Raised scripts can split a genuine continuation into a new raw block.
+            a_box = span_a_last.get('block_bbox')
+            b_box = span_b_first.get('block_bbox')
+            size = max(span_a_last.get('size', 10), span_b_first.get('size', 10))
+            if (block_b != block_a + 1 or line_b != 0
+                    or line_a != max(s['line_idx'] for s in spans if s.get('block_idx') == block_a)
+                    or a_box is None or b_box is None
+                    or span_a_last.get('line_bbox') is None or span_b_first.get('line_bbox') is None
+                    or b_box.y0 < a_box.y1
+                    or abs(a_box.x0 - b_box.x0) > size / 2
+                    or abs(span_b_first['bbox'].x0 - a_box.x0) > size / 2
+                    or span_a_last['bbox'].x0 - a_box.x0 < 2 * size):
+                continue
 
         line_a_box = span_a_last.get('line_bbox')
         line_b_box = span_b_first.get('line_bbox')

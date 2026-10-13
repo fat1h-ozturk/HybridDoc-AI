@@ -1,0 +1,79 @@
+{
+  "experiment": "separately_authorized_corrected_source_verification",
+  "model": "docling-project/CodeFormulaV2",
+  "revision": "ecedbe111d15c2dc60bfd4a823cbe80127b58af4",
+  "dtype": "float32",
+  "device": "cpu",
+  "threads": 2,
+  "batch": 1,
+  "budget_seconds": 240,
+  "timeout_seconds": 120,
+  "max_calls": 2,
+  "versions": {
+    "torch": "2.14.1+cpu",
+    "docling": "2.137.0",
+    "transformers": "5.19.0",
+    "PyMuPDF": "1.28.2"
+  },
+  "source_sha256": "9e3fcd71e94e495a3e375826fbec625b18ddb8c332ac6cb39b4809082ad19315",
+  "source_typography": "corrected; reviewed PyMuPDF and Poppler pixels; source/grouping tests pass",
+  "calls": [
+    {
+      "case": "corrected_negative",
+      "matrix": [
+        3,
+        3
+      ],
+      "equivalent_dpi": 216,
+      "pixmap_dpi": [
+        96,
+        96
+      ],
+      "bbox": [
+        38.0,
+        283.28900146484375,
+        58.0,
+        308.28900146484375
+      ],
+      "formula_id": "p1-f7",
+      "crop_sha256": "4f622f0280b87882b0e555545ea5afef065dbc3000f9c63e96645a79718832d4",
+      "width": 60,
+      "height": 76,
+      "gold": "2 ^ { - \\frac { 2 } { 3 } }",
+      "raw_latex": "2 ^ { \\cdot \\frac { 2 } { 3 } }",
+      "status": "returned",
+      "comparison": "FAIL",
+      "reason": "transcription mismatch: candidate '2 ^ { \\\\cdot \\\\frac { 2 } { 3 } }' != gold '2 ^ { - \\\\frac { 2 } { 3 } }'",
+      "seconds": 54.55476002100113
+    },
+    {
+      "case": "positive_fraction",
+      "matrix": [
+        3,
+        3
+      ],
+      "equivalent_dpi": 216,
+      "pixmap_dpi": [
+        96,
+        96
+      ],
+      "bbox": [
+        38.0,
+        52.17499923706055,
+        112.0,
+        90.28900146484375
+      ],
+      "formula_id": "p1-f1",
+      "crop_sha256": "d69f97e295167887d13f2d4da93698468b6c096e80c0f6065ea248e17f9cf4f1",
+      "width": 222,
+      "height": 115,
+      "gold": "f(x) = \\frac{x^2 + 1}{2y - 3}",
+      "raw_latex": "f ( x ) = \\frac { x ^ { 2 } + 1 } { 2 y - 3 }",
+      "status": "returned",
+      "comparison": "PASS",
+      "reason": "transcription matches gold expression",
+      "seconds": 34.4195162779979
+    }
+  ],
+  "elapsed_seconds": 89.02847773800022
+}

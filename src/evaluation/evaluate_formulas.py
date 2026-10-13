@@ -13,6 +13,7 @@ Separates geometry/candidate routing from transcription fidelity.
 Never uses private document paths or coordinates.
 """
 import argparse
+from contextlib import redirect_stdout
 import json
 from pathlib import Path
 import re
@@ -58,12 +59,13 @@ def create_synthetic_benchmark_pdf(pdf_path):
     p.insert_text((40, 280), 'g(x) = C')
     p.insert_text((95, 280), ' on the branch of the initial point. The condition gives ')
     p.insert_text((420, 280), 'K =')
-    p.insert_text((40, 296), '2')
-    p.insert_text((46, 293), '-', fontsize=6)
+    # Keep the full exponent raised, with clear ink gaps around its thin rule.
+    p.insert_text((40, 303), '2')
+    p.insert_text((46, 295), '-', fontsize=6)
     p.insert_text((51, 291), '2', fontsize=6)
-    p.insert_text((51, 296), '3', fontsize=6)
-    p.draw_line((51, 293), (56, 293))
-    p.insert_text((60, 296), '. Cubing yields.')
+    p.insert_text((51, 299), '3', fontsize=6)
+    p.draw_line((51, 293), (56, 293), width=0.4)
+    p.insert_text((60, 303), '. Cubing yields.')
 
     doc.save(str(pdf_path))
     doc.close()
@@ -601,12 +603,13 @@ def main(argv=None):
             budget_seconds=args.budget,
         )
 
-    results = evaluate_formula_cases(
-        pdf_path=args.pdf,
-        recognizer=recognizer,
-        is_stub=is_stub,
-        provenance=provenance,
-    )
+    with redirect_stdout(sys.stderr):
+        results = evaluate_formula_cases(
+            pdf_path=args.pdf,
+            recognizer=recognizer,
+            is_stub=is_stub,
+            provenance=provenance,
+        )
 
     rendered_json = json.dumps(results, indent=2, ensure_ascii=False)
     if args.output:

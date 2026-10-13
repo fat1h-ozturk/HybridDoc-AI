@@ -1,0 +1,95 @@
+{
+  "model": "docling-project/CodeFormulaV2",
+  "revision": "ecedbe111d15c2dc60bfd4a823cbe80127b58af4",
+  "dtype": "float32",
+  "device": "cpu",
+  "threads": 2,
+  "batch": 1,
+  "budget_seconds": 360,
+  "timeout_seconds": 120,
+  "source_sha256": "70932227d57c0f2cc06fab10b3ff0c2b3f707254960e4b23eaa4921c1b20926c",
+  "hypothesis": "Higher PDF raster density preserves tiny strokes before Idefics3 resize; no added margins or source edits.",
+  "calls": [
+    {
+      "case": "negative",
+      "dpi": 216,
+      "bbox": [
+        38.0,
+        283.28900146484375,
+        58.0,
+        301.28900146484375
+      ],
+      "formula_id": "p1-f7",
+      "crop_sha256": "d291eca70048f1568f61e565e3b4b87b1ff06940aceb5f3256db9084670c6f8a",
+      "width": 60,
+      "height": 55,
+      "gold": "2 ^ { - \\frac { 2 } { 3 } }",
+      "raw_latex": "2 \\cdot \\frac { 2 } { 3 }",
+      "status": "returned",
+      "comparison": "FAIL",
+      "reason": "transcription mismatch: candidate '2 \\\\cdot \\\\frac { 2 } { 3 }' != gold '2 ^ { - \\\\frac { 2 } { 3 } }'",
+      "seconds": 55.042316853003285
+    },
+    {
+      "case": "negative",
+      "dpi": 600,
+      "bbox": [
+        38.0,
+        283.28900146484375,
+        58.0,
+        301.28900146484375
+      ],
+      "formula_id": "p1-f7",
+      "crop_sha256": "de2c5d7e309ad475be898fef5d2cd42309ecff8189b8f20e9b7d8eac80a30f1c",
+      "width": 168,
+      "height": 151,
+      "gold": "2 ^ { - \\frac { 2 } { 3 } }",
+      "raw_latex": "2 - \\frac { 2 } { 3 }",
+      "status": "returned",
+      "comparison": "FAIL",
+      "reason": "transcription mismatch: candidate '2 - \\\\frac { 2 } { 3 }' != gold '2 ^ { - \\\\frac { 2 } { 3 } }'",
+      "seconds": 44.25496147300146
+    },
+    {
+      "case": "positive_fraction",
+      "dpi": 216,
+      "bbox": [
+        38.0,
+        52.17499923706055,
+        112.0,
+        90.28900146484375
+      ],
+      "formula_id": "p1-f1",
+      "crop_sha256": "64336513934fda54d31cc890f58212f37d51688e5748c5e25244096dc21459c3",
+      "width": 222,
+      "height": 115,
+      "gold": "f(x) = \\frac{x^2 + 1}{2y - 3}",
+      "raw_latex": "f ( x ) = \\frac { x ^ { 2 } + 1 } { 2 y - 3 }",
+      "status": "returned",
+      "comparison": "PASS",
+      "reason": "transcription matches gold expression",
+      "seconds": 34.79713358999652
+    },
+    {
+      "case": "positive_fraction",
+      "dpi": 600,
+      "bbox": [
+        38.0,
+        52.17499923706055,
+        112.0,
+        90.28900146484375
+      ],
+      "formula_id": "p1-f1",
+      "crop_sha256": "61981a3dd9af2dca8da3c172bf60155b7fd308d3330d3186b87fdd946b4fcb80",
+      "width": 618,
+      "height": 319,
+      "gold": "f(x) = \\frac{x^2 + 1}{2y - 3}",
+      "raw_latex": "f ( x ) = \\frac { x ^ { 2 } + 1 } { 2 y - 3 }",
+      "status": "returned",
+      "comparison": "PASS",
+      "reason": "transcription matches gold expression",
+      "seconds": 34.80855750400224
+    }
+  ],
+  "elapsed_seconds": 168.9440673680001
+}

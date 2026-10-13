@@ -169,6 +169,11 @@ ID'si, bbox'ı, SHA-256'sı, özgün metni ve aday LaTeX'i eksiksiz korunur; uza
 fiziksel olarak birleştirilmez. Aradaki anlamlı düz yazı, farklı paragraf, sütun veya
 tablo hücreleri bu gruplamayı kesin olarak reddeder.
 
+PyMuPDF yükseltilmiş simgeler nedeniyle devamı ayrı bir ham metin bloğuna ayırabilir.
+Kaynakta ardışık iki blok, aynı sol kenar, son/ilk satır ve normal satır aralığı
+kanıtı taşıyorsa satır sonundan sol kenara dönen eksik bağıntı yine gruplanabilir.
+Bu bağlantı sezgiseldir; cevap kanıtı olarak onaylanmaz.
+
 **Güven sözleşmesi:** Her formül `original_text`, `latex`, `page_number`,
 `bbox`, `source_sha256`, `recognition_status`, `state` ve `reason` taşır.
 Formül bbox'ları döndürülmemiş sayfanın koordinat sistemindedir; özgün bölge
@@ -233,6 +238,7 @@ print(format_evaluation_report(results))
   2. Tekil üs/alt indis simgelerindeki gereksiz parantezler (`t^{2}` vs `t^2`, `a_{i}` vs `a_i`) eşitlenir.
   Çok simgeli üsler/indisler (`t^{2n}`), kesirli ve negatif üsler (`2^{-2/3}`), kök kapsamları (`\sqrt{u+v}`), mutlak değer çubukları (`|`), işlem işaretleri ve sembolik küme parantezleri (`\{`) semantik olarak kesinlikle korunur. Desteklenmeyen veya farklı yapılar açık uyumsuzluk (`FAIL`) olarak kaydedilir; keyfi semantik onarım veya genel LaTeX parse motoru kullanılmaz.
 - **Sentetik Benchmark Font ve Geometri Doğruluğu:** `SYN-FRAC` sentetik fikstürü, kaynakta ASCII şapka (`^`) yerine PDF yerleşik fontlarıyla yükseltilmiş matematiksel üs (`x`, `2`, `+ 1`) geometrisi çizer; böylece modelin fiziksel glifleri doğru okuması ve altın veriyle hizalanması sağlanır.
+- **Negatif Kesirli Üs Sınırlaması:** `SYN-WRAP` kaynağındaki payda/çizgi çakışması ve üs konumu düzeltildi. Düzeltilmiş açık kaynakta model hâlâ eksi yerine `\cdot` döndürdü; sonuç `FAIL` olarak korunur. [Kaynaklar, ayrı ölçüm bütçeleri ve yeniden üretilebilir regresyon](docs/small_formula_ocr.md) gerçek OCR doğruluğunu deterministik testlerden ayırır.
 - **Ayrı Sayım Metrikleri:** Komut çıktısı Geometri Yönlendirmesi ve Transkripsiyon Sadakati için ayrı ayrı `PASS`, `FAIL`, `AMBIGUOUS` ve `UNMEASURED` sayaçları üretir.
 - **Cevap Uygunluğu Değişmezliği:** Sentetik benchmark'ta tüm adaylar `answer_eligible=false` ve `detection_status=native_heuristic_incomplete` sözleşmesini korur. Başarılı sentetik eşleşmeler üretim formüllerini kesin gerçek olarak onaylamaz.
 - **İzole Sentetik Veri:** Değerlendirme yalnızca açık sentetik test geometrileri kullanır; özel PDF yolları veya koordinatları repoya veya CI'a dahil edilmez.
