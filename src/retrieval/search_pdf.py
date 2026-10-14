@@ -191,6 +191,7 @@ def search_pdf(
     top_k: int = 3,
     max_chars: int = 1000,
     overlap: int = 100,
+    boundary: str = "character",
 ) -> List[Dict[str, Any]]:
     """Load PDF natively, chunk pages, and rank chunks deterministically by BM25.
 
@@ -198,8 +199,9 @@ def search_pdf(
         file_path: Path to the target PDF document.
         query: Lexical search query string.
         top_k: Positive integer specifying maximum matching chunks to return.
-        max_chars: Maximum characters per chunk for prose text.
+        max_chars: Maximum character budget per chunk for prose text.
         overlap: Overlap characters between consecutive prose chunks.
+        boundary: Chunk boundary mode: 'character' (default) or 'word'.
 
     Returns:
         List of matching chunk result dicts with positive relevance scores.
@@ -212,7 +214,9 @@ def search_pdf(
     with redirect_stdout(sys.stderr):
         pages = load_pdf_formulas(path)
 
-    raw_chunks = chunk_formula_pages(pages, max_chars=max_chars, overlap=overlap)
+    raw_chunks = chunk_formula_pages(
+        pages, max_chars=max_chars, overlap=overlap, boundary=boundary
+    )
 
     chunks = []
     for i, c in enumerate(raw_chunks, start=1):
@@ -326,6 +330,12 @@ def main(argv=None) -> int:
         help="Maximum number of positive matching chunks to return (default: 3)",
     )
     parser.add_argument(
+        "--boundary",
+        choices=["character", "word"],
+        default="character",
+        help="Chunk boundary mode: 'character' (default) or 'word' to align prose boundaries to whitespace words.",
+    )
+    parser.add_argument(
         "--output",
         "-o",
         type=Path,
@@ -334,7 +344,12 @@ def main(argv=None) -> int:
 
     args = parser.parse_args(argv)
     try:
-        results = search_pdf(args.pdf, args.query, top_k=args.top_k)
+        results = search_pdf(
+            args.pdf,
+            args.query,
+            top_k=args.top_k,
+            boundary=args.boundary,
+        )
         formatted = format_search_results(results, args.query, file_path=args.pdf)
         print(formatted, end="")
         if args.output:

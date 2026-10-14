@@ -73,17 +73,33 @@ RAG-OCR-proje/
 
 ## Sayfa Kaynaklı Metin Parçalama
 
-PDF okuyucusunun sayfa kayıtlarını karakter sınırlarıyla parçalamak için proje kökünden şu komutu çalıştırın:
+PDF okuyucusunun sayfa kayıtlarını parçalamak için proje kökünden metin parçalayıcı komutunu çalıştırabilirsiniz.
+
+Varsayılan karakter tabanlı parçalama:
 
 ```bash
 python -m src.chunking.text_chunker sample_docs/Fatih_RAG_OCR_Multimodal_PDF_Use_Case.pdf
 ```
 
-Komut varsayılan olarak en fazla 1000 Python karakteri ve 100 karakter örtüşme kullanır; örnek bir parçanın dosya adını ve kaynak sayfasını gösterir.
+Sözcükleri ve bağlamı koruyan opt-in sözcük sınırı (`--boundary word`) parçalama:
 
-Boyut birimi tokenizer token'ı değildir; Python `len()` ile sayılan Unicode karakter konumlarıdır.
+```bash
+python -m src.chunking.text_chunker sample_docs/Fatih_RAG_OCR_Multimodal_PDF_Use_Case.pdf \
+  --boundary word \
+  --chunk-size 1000 \
+  --overlap 100 \
+  --output chunks.txt
+```
 
-`chunk_pages(pages, max_chars=1000, overlap=100)` fonksiyonu her sayfayı ayrı işler, boş veya yalnızca boşluk içeren sayfaları atlar ve parçalarda kaynak `page_number`, `file_name` ve `total_pages` alanlarını korur. Her parçanın `text` alanı ilgili metin dilimini, `char_count` alanı ise o parçanın karakter sayısını içerir. `max_chars` pozitif bir tam sayı, `overlap` ise `0 <= overlap < max_chars` koşulunu sağlayan bir tam sayı olmalıdır; boolean değerler kabul edilmez.
+Tüm parçaları doğrudan terminalde eksiksiz incelemek için `--inspect` bayrağı eklenebilir.
+
+### Karakter Bütçesi ve Sınır Kuralları
+
+- **Maksimum Karakter Bütçesi (`chunk_size` / `max_chars`):** Boyut birimi tokenizer token'ı veya kelime sayısı değildir; Python `len()` ile sayılan Unicode karakter konumlarıdır. Hiçbir parça belirtilen `chunk_size` sınırını aşamaz.
+- **Sözcük Sınırları (`--boundary word`):** Düz yazı metninde boşlukla ayrılmış sıradan sözcüklerin hem parça bitişlerinde hem de örtüşme (overlap) başlangıçlarında ortadan bölünmesini engeller. Tüm özgün metin ve sayfa metaverileri korunur.
+- **Örtüşme Davranışı:** Sözcük modunda sözcük kenarlarına hizalama yapıldığından tam 100 karakterlik sabit örtüşme garanti edilmez; hedef örtüşmeye en yakın sözcük sınırına hizalanır.
+- **Aşırı Uzun Kesintisiz Dizeler (Bounded Fallback):** Boşluk içermeyen ve bütçeyi aşan kesintisiz uzun simge/sözcük dizilerinde (unbroken strings) deterministik karakter kesme devreye girer; böylece metin kaybı yaşanmaz, azami bütçe kesinlikle aşılmaz ve dar bütçe/geniş örtüşmelerde sonsuz döngü engellenir.
+- **Geriye Dönük Uyumluluk:** Varsayılan mod `--boundary character` (eski karakter tabanlı dilimleme) olarak kalır. `chunk_pages(pages, max_chars=1000, overlap=100, boundary="word")` fonksiyonu API düzeyinde doğrudan kullanılabilir; `chunk_size` parametresi `max_chars` için geriye dönük uyumlu bir alias'tır.
 
 ## İsteğe Bağlı Yerel Formül Çıkarma
 
