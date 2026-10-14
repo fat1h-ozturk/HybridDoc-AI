@@ -284,6 +284,45 @@ print(format_evaluation_report(results))
 - **Cevap Uygunluğu Değişmezliği:** Sentetik benchmark'ta tüm adaylar `answer_eligible=false` ve `detection_status=native_heuristic_incomplete` sözleşmesini korur. Başarılı sentetik eşleşmeler üretim formüllerini kesin gerçek olarak onaylamaz.
 - **İzole Sentetik Veri:** Değerlendirme yalnızca açık sentetik test geometrileri kullanır; özel PDF yolları veya koordinatları repoya veya CI'a dahil edilmez.
 
+## Çevrimdışı Formül İnceleme ve Kaynak Kanıtı Görselleştirme (Formula Review Export)
+
+Çıkarılan formül bölgelerini, kaynak PNG kırpıntılarını (PyMuPDF 3x render), ham aday LaTeX metinlerini ve işaret/eylem tutarlılık tanılarını bağımsız ve tek parça statik bir HTML raporu olarak dışa aktarmak için:
+
+### 1. Varsayılan Çevrimdışı Mod (Yalnızca Yerel Çıkarım - Native-Only)
+Herhangi bir OCR modeli veya harici bağımlılık çalıştırmadan, yalnızca PDF'teki dijital formül adaylarını ve kaynak kırpıntılarını görselleştirir (aday LaTeX üretilmez, açıkça `No OCR candidate` olarak etiketlenir):
+
+```bash
+.venv/bin/python -m src.evaluation.review_formulas belge.pdf --output review.html
+```
+
+### 2. Kaydedilmiş Çıkarım JSON'u ile İnceleme (Saved Candidates & Warnings)
+Daha önce `src.ingestion.formula_loader` ile üretilmiş aday LaTeX ve işaret uyarılarını içeren JSON dışa aktarımı ile birlikte görselleştirme:
+
+```bash
+# Adım 1: formula_loader ile JSON çıkarımı oluşturma (model isteğe bağlıdır)
+.venv/bin/python -m src.ingestion.formula_loader belge.pdf --output extraction.json
+
+# Adım 2: İnceleme HTML raporunu üretme
+.venv/bin/python -m src.evaluation.review_formulas belge.pdf --output review.html --extraction extraction.json
+```
+
+Oluşturulan HTML dosyasını tarayıcınızda açarak inceleyebilirsiniz:
+
+```bash
+# Google Chrome veya varsayılan sistem tarayıcısı ile açma
+google-chrome review.html
+# veya
+xdg-open review.html
+```
+
+### Özellikler ve Güven Sözleşmesi
+- **Kendi Kendine Yeten Statik HTML (Zero JS / Zero Network):** Üretilen rapor tamamen tek parça UTF-8 HTML'dir. Sunucu, webapp çatısı, Google Fonts, CDN veya JavaScript çalıştırması içermez. Tüm kaynak formül kırpıntıları doğrudan `data:image/png;base64` veri URL'leri olarak gömülür.
+- **Garantili SHA-256 Eşleşmesi:** `--extraction` parametresi verildiğinde, JSON içerisindeki `source_sha256` değeri sağlanan PDF dosyasının SHA-256 özetiyle tam olarak eşleşmek zorundadır. Eksik, uyumsuz veya tahrif edilmiş özetler ve sayfa sınırları dışındaki (`out-of-bounds`) koordinatlar açıklayıcı hata ile kesinlikle reddedilir.
+- **İki Sütunlu Karşılaştırma Düzeni:** Masaüstünde sol sütunda yerel kaynak PNG kırpıntısı, özgün metin ve koordinatlar; sağ sütunda ise ham aday LaTeX, tanıma durumu ve işaret tutarlılığı tanıları sergilenir (küçük ekranlarda duyarlı olarak tek sütuna katlanır).
+- **Satır Sonu İlişkisel Gruplar (Wrapped Groups):** Satır sonu devam ilişkisi bulunan formüllerde (`p1-f6+p1-f7`), çocuk formüllerin tekil sınır kutuları (`bbox`), sırası ve kırpıntıları kesinlikle korunur; yapay bileşik kırpıntı üretilmez ve kartlar arasında iki yönlü bağlantı bağlantıları (`#card-id` ve `#group-id`) sunulur.
+- **Doğruluk İddiası Yoktur:** Desteklenen eksi kapsamlarında çelişki bulunmaması (`no_conflict_detected`), formülün matematiksel olarak doğrulanmış olduğu anlamına gelmez. Adaylar kesinlikle onarılmaz; ham hali ve varsa uyarılarıyla birlikte gösterilir. `answer_eligible=false` ve eksik tespit uyarıları raporun en başında belirgin şekilde vurgulanır.
+- **Girdi Koruma Garantisi:** Çıktı HTML yolu, kaynak PDF veya çıkarım JSON dosyalarının üzerine yazılamaz ya da bu yollarla eşlenemez (alias oluşturulamaz).
+
 ## Çevrimdışı Anahtar Kelime Kaynak Arama (BM25 Source Search)
 
 Harici model indirme, API veya vektör veritabanı gerektirmeyen, Python standart kütüphanesiyle çalışan deterministik Okapi BM25 sözlüksel arama bileşeni mevcuttur. Belgedeki düz yazı parçalarını ve formül bileşen metinlerini indeksleyerek ilgili kaynak sayfaları ve parçaları sıralar.
