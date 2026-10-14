@@ -97,11 +97,11 @@ if __name__ == "__main__":
         print(f"❌ Hata: {err}")
 
 
-def load_pdf_formulas(file_path: str | Path, *, recognizer=None) -> List[Dict[str, Any]]:
+def load_pdf_formulas(file_path: str | Path, *, recognizer=None, pages=None, formula_ids=None) -> List[Dict[str, Any]]:
     """Optional native regions/local LaTeX candidates; see formula_loader CLI.
 
     Successful recognition is unverified and must not be used as answer evidence.
     The original load_pdf API and output remain unchanged.
     """
     from src.ingestion.formula_loader import load_pdf_formulas as extract
-    return extract(file_path, recognizer=recognizer)
+    return extract(file_path, recognizer=recognizer, pages=pages, formula_ids=formula_ids)
