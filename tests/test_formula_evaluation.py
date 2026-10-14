@@ -137,7 +137,7 @@ def test_synthetic_benchmark_covers_all_five_categories_and_passes(tmp_path):
     # CRITICAL: Confirm prose contamination ('Cubing yields.' and 'g( )') is strictly absent
     assert 'Cubing' not in obs_wrap['original_text']
     assert 'g( )' not in obs_wrap['original_text']
-    assert '2- 2' in obs_wrap['original_text']
+    assert '2\n- 2\n3' in obs_wrap['original_text']
     assert 'K =' in obs_wrap['original_text']
 
 
@@ -387,7 +387,7 @@ def test_surrounding_prose_preserved_in_order_without_contamination(tmp_path):
 
     # Formula group is uncontaminated
     grp = page['formula_groups'][0]
-    assert grp['original_text'] == 'K = 2- 2\n3'
+    assert grp['original_text'] == 'K = 2\n- 2\n3'
     assert 'Cubing yields.' not in grp['original_text']
     assert 'g( )' not in grp['original_text']
 
