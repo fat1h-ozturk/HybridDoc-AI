@@ -4,6 +4,7 @@ from pathlib import Path
 import pymupdf
 from src.ingestion.pdf_loader import PDFDocumentLoader
 from src.ingestion.formula_regions import propose_regions
+from src.ingestion.formula_signs import check_formula_signs, summarize_sign_checks, sign_warning_text
 
 _RELATIONAL_OPS = ('=', '≠', '≈', '≤', '≥', '<', '>')
 
@@ -113,11 +114,12 @@ def load_pdf_formulas(file_path, *, recognizer=None):
     """
     loader = PDFDocumentLoader(file_path)
     source_hash = hashlib.sha256(loader.file_path.read_bytes()).hexdigest()
-    pages, pending = [], []
+    pages, pending, page_spans = [], [], []
     with pymupdf.open(loader.file_path) as doc:
         for pn, page in enumerate(doc, 1):
             page.set_rotation(0)
             regions, spans, table_error = propose_regions(page)
+            page_spans.append(spans)
             formulas, owners = [], {}
             blocks = [{'kind': 'warning', 'text':
                        '[UNVERIFIED NATIVE TEXT: math detection is incomplete; source review required]'}]
@@ -208,14 +210,17 @@ def load_pdf_formulas(file_path, *, recognizer=None):
                     candidate = recognizer.recognize(png)
                     if not isinstance(candidate, str) or not candidate.strip():
                         raise ValueError('recognizer returned empty/non-text LaTeX')
-                    f.update(latex=candidate.strip(), recognition_status='returned',
+                    f.update(latex=candidate.strip(), raw_latex=candidate, recognition_status='returned',
                              state='unresolved' if review_required else 'unverified',
                              reason='layout_scope_or_script_attachment_requires_source_review' if review_required else 'recognizer_output_not_verified')
                 except Exception as exc:
                     f.update(state='unresolved', recognition_status='failed',
                              reason=f'{type(exc).__name__}: {exc}')
-    for page in pages:
+    for page, spans in zip(pages, page_spans):
         by_id = {f['id']: f for f in page['formulas']}
+        for f in page['formulas']:
+            check_formula_signs(f, spans)
+        page['sign_consistency'] = summarize_sign_checks(page['formulas'])
         for grp in page.get('formula_groups', []):
             child_formulas = [by_id[fid] for fid in grp['formula_ids']]
             grp['formulas'] = child_formulas
@@ -230,16 +235,18 @@ def load_pdf_formulas(file_path, *, recognizer=None):
                 grp['latex'] = None
                 grp['state'] = 'unresolved'
             grp['answer_eligible'] = False
+            grp['warnings'] = [w for f in child_formulas for w in f['warnings']]
+            grp['sign_consistency'] = summarize_sign_checks(child_formulas)
 
         for block in page['blocks']:
             if block['kind'] == 'formula':
                 f = by_id[block['formula_id']]
                 label = f"[{f['state'].upper()} FORMULA {f['id']}; not answer evidence]"
-                block['text'] = label + (f"\n\\[ {f['latex']} \\]" if f['latex'] else '')
+                block['text'] = label + (f"\n\\[ {f['latex']} \\]" if f['latex'] else '') + sign_warning_text(f)
             elif block['kind'] == 'formula_group':
                 grp = block['group']
                 label = f"[{grp['state'].upper()} FORMULA GROUP {grp['id']}; heuristic wrapped relation; not answer evidence]"
-                block['text'] = label + (f"\n\\[ {grp['latex']} \\]" if grp['latex'] else '')
+                block['text'] = label + (f"\n\\[ {grp['latex']} \\]" if grp['latex'] else '') + sign_warning_text(grp)
         page['text'] = '\n'.join(b['text'] for b in page['blocks'])
         page['char_count'] = len(page['text'])
         page['math_status'] = ('unresolved' if page['unresolved_reason'] or any(f['state']=='unresolved' for f in page['formulas'])
