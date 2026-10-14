@@ -68,6 +68,8 @@ def propose_regions(page):
                 text = ''.join(c['c'] for c in span['chars'])
                 if text.strip():
                     spans.append({'text': text, 'bbox': pymupdf.Rect(span['bbox']),
+                                  'chars': span['chars'],
+                                  'direction': line['dir'],
                                   'size': span['size'], 'script': bool(span['flags'] & 1),
                                   'math': _math_text(text, span['font'])
                                   or bool(span['flags'] & 1),

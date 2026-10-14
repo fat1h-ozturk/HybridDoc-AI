@@ -192,6 +192,47 @@ taşır. Sayfa görüntüsü kaynak kanıtıdır, aday LaTeX'in doğruluk sertif
 değildir. Bu özellik yalnızca ilişkisel kaynak bağlamını korur; eksiksiz bir PDF soru-cevap
 sistemi kurmaz.
 
+### Kaynak Eksi İşareti Tutarlılık Uyarısı
+
+Native glif kanıtı ve döndürülmüş LaTeX birlikte varsa `sign_consistency`,
+eksi işaretinin desteklenen kapsamda ve komşu operandlarla korunup korunmadığını
+sezgisel olarak kontrol eder. Üs/alt indis, tek kesrin pay/payda kapsamı ve
+basit satır içi işaretler ayrılır; paydadaki eksi, eksik üs eksisini karşılamaz.
+`warnings` kaynak işareti, span/karakter konumu, glif ve formül bbox'ı, sayfa,
+SHA-256 ve değiştirilmemiş `raw_candidate` taşır. Gruplar, atomik parçalar ve
+arama gösterimi bu uyarıları korur. Mevcut tanıma `reason`/hata durumları değişmez.
+
+Örnek: [kaydedilmiş açık kaynak ölçümü](eval_data/small_formula_ocr_corrected.json)
+`2 ^ { \\cdot \\frac { 2 } { 3 } }` döndürmüştür. Aynı PDF ile bu çıktıyı
+**kontrollü recognizer double** üzerinden tekrar oynatınca beklenen sonuç:
+
+```json
+{
+  "sign_consistency": {"status": "mismatch"},
+  "warnings": [{
+    "code": "source_minus_candidate_conflict",
+    "page_number": 1,
+    "source_operators": [{"operator": "-", "span_id": 18,
+      "scope": [["superscript", "2"]]}],
+    "raw_candidate": "2 ^ { \\cdot \\frac { 2 } { 3 } }"
+  }],
+  "answer_eligible": false
+}
+```
+
+Bu kısaltılmış örnek yeni OCR ölçümü değildir; kalan model hatası düzeltilmez.
+`no_conflict_detected` yalnızca desteklenen eksi kanıtında çatışma bulunmadığını
+belirtir; kök, üs, alt indis veya bütün formülün doğruluğunu kanıtlamaz.
+Tanıma yapılmamış/başarısızsa, native glif yoksa, tarama/görselde veya desteklenen
+eksi kanıtı çıkarılamıyorsa `not_checked` kalır. Native yazı sözcükleri,
+satır sonu tireleri ve çizilmiş kesir çizgileri eksi olarak sayılmaz.
+Yatay native yerleşim, tek atomlu script tabanları ve sınırlı TeX sözdizimi desteklenir; metin
+komutlarının içindeki işaretler matematik işareti sayılmaz. Birden çok kesir,
+tekrarlanan kapsam/taban, belirsiz script bağlantısı, bozuk veya desteklenmeyen
+TeX `uncertain` uyarısı üretir. Genel LaTeX/algebra doğrulaması yapılmaz;
+`native_heuristic_incomplete`, doğrulanmamış durumlar ve `answer_eligible=false`
+korunur. Varsayılan CLI/arama native-only kalır ve OCR çalıştırıldığını iddia etmez.
+
 ### Çevrimdışı Formül Regresyon ve Değerlendirme
 
 Çevrimdışı, model indirme veya harici API gerektirmeyen deterministik formül değerlendirme komutu mevcuttur. 5 temel regresyon kategorisini (kesir pay/payda tam kapsamı, kök vinculum kapsamı, üst/alt simge, tekil mutlak değer çubukları ve satır sonu ilişkisel formül devamları) geometrik aday yönlendirmesi ve metin kirlenmesi açısından test eder.

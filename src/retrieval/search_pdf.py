@@ -19,6 +19,7 @@ os.environ.setdefault("PYMUPDF_SUGGEST_LAYOUT_ANALYZER", "0")
 
 from src.ingestion.pdf_loader import load_pdf_formulas
 from src.chunking.text_chunker import chunk_formula_pages
+from src.ingestion.formula_signs import sign_warning_text
 
 
 def normalize_text(text: str) -> str:
@@ -265,6 +266,13 @@ def format_search_results(
         )
         if res.get("review_reason"):
             lines.append(f"Review Reason: {res['review_reason']}")
+        for formula in res.get('formulas', []):
+            check = formula.get('sign_consistency')
+            if check:
+                lines.append(f"Minus check {formula['id']}: {check['status']} ({check['reason']}); not formula verification")
+            warning = sign_warning_text(formula)
+            if warning:
+                lines.append(warning.lstrip('\n'))
 
         # Formula group details if present
         if res.get("formula_groups"):
