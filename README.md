@@ -159,6 +159,62 @@ uzunsa tek, daha büyük parça üretir. Düz yazı blokları karakter/örtüşm
 kurallarını kullanır; formül örtüşmesi yapılmaz. Parçalar kaynak sayfa, hash,
 bbox, özgün metin ve belirsizlik alanlarını korur.
 
+### Seçici Yerel Formül Tanıma (Selective Formula OCR)
+
+Tüm belgedeki onlarca veya yüzlerce formül (örneğin 188 formül) için işlem bütçesini tüketmek yerine, kullanıcının yalnızca incelemek istediği tek bir formülü veya belirli sayfaları seçip tanıma bütçesini sınırlayarak çalıştırmasını sağlar.
+
+#### 1. Formül ID'lerini Keşfetme (Native Inventory)
+Önce sıfır OCR harcaması ve model yükü olmadan belgedeki tüm aday bölgelerin ve grupların listesini (envanter) çıkarın:
+
+```bash
+.venv/bin/python -m src.ingestion.formula_loader belge.pdf --output envanter.json
+```
+
+Bu JSON çıktısında her adayın `id` (ör. `p1-f7`) ve sayfa numarası yer alır. İstenirse `.venv/bin/python -m src.evaluation.review_formulas belge.pdf --output envanter.html` ile tarayıcıda görsel olarak incelenebilir.
+
+#### 2. Seçici Tanıma Komutu (Selective OCR)
+Opsiyonel formül ortamı ve model önbellek dizini kullanılarak (modelleri içermeyen standart `.venv` yerine opsiyonel formül ortamı ile) yalnızca ilgilenilen formül tanınır:
+
+```bash
+# Tek bir formül ID seçimi
+env PYTHONPATH=".venv/lib/python3.14/site-packages" /home/fatih/projects/firstmate/data/hybriddoc-formula-fidelity/ocr-venv/bin/python -m src.ingestion.formula_loader belge.pdf \
+  --recognize \
+  --formula-id p1-f7 \
+  --cache-dir /home/fatih/projects/firstmate/data/hybriddoc-formula-fidelity/model-cache \
+  --timeout 120 \
+  --budget 150 \
+  --output selected.json
+```
+
+Sayfa bazında filtreleme için tekrarlanabilir `--page` parametresi kullanılabilir:
+
+```bash
+# Yalnızca 1. sayfadaki formüller
+env PYTHONPATH=".venv/lib/python3.14/site-packages" /home/fatih/projects/firstmate/data/hybriddoc-formula-fidelity/ocr-venv/bin/python -m src.ingestion.formula_loader belge.pdf \
+  --recognize \
+  --page 1 \
+  --cache-dir /home/fatih/projects/firstmate/data/hybriddoc-formula-fidelity/model-cache \
+  --timeout 120 \
+  --budget 150 \
+  --output selected.json
+```
+
+#### 3. İnceleme Raporunu Dışa Aktarma
+Ardından standart ortamdaki `review_formulas` ile çıkarım incelenir:
+
+```bash
+.venv/bin/python -m src.evaluation.review_formulas belge.pdf \
+  --extraction selected.json \
+  --output selected.html
+```
+
+#### Seçici Tanıma Semantiği ve Kuralları
+- **Yalnızca Tanıma Çağrılarını Sınırlar:** `--page` ve `--formula-id` filtreleri yalnızca model çağrılarını (`recognizer.recognize`) sınırlar. Belgenin tam native bağlamı, tüm sayfaları, düz yazı blokları, formülleri ve grupları çıktıda eksiksiz korunur.
+- **Seçilmeyen Formüller:** Seçilmeyen formüller başarısız (`failed`) sayılmaz; açıkça `recognition_status="not_requested"` ve `reason="not_selected_for_recognition"` durumunu alır. İşaret tutarlılık tanıları `not_checked` kalır, `answer_eligible=false` korunur.
+- **Kısmi Gruplar (Partial Groups):** Bir formül grubu içindeki çocuklardan yalnızca biri seçildiğinde kardeş formüllere otomatik genişletilmez (`no auto-expansion`). Kısmen tanınan grup `state="unresolved"` kalır, asla birleşik tam formül uydurulmaz (`latex=null`) ve açıkça `partial_group_recognition` uyarısı verilir.
+- **Grup ID Reddi:** Filtreye doğrudan grup ID'si (ör. `p1-f6+p1-f7`) verilemez; sistem bunu reddederek seçilebilecek çocuk yaprak ID'leri (`p1-f6`, `p1-f7`) açıkça bildirir.
+- **Hata ve Bütçe Koruma:** Filtreler `--recognize` olmadan çalıştırılamaz. Geçersiz/aralık dışı sayfa, bilinmeyen ID, seçilen sayfa dışındaki ID veya boş seçim durumunda herhangi bir OCR modeli çalıştırılmadan önce hata verilir. Filtreler zaman aşımı veya toplam tanıma bütçesini sıfırlamaz.
+
 ### Satır Sonu İlişki Devamları (Wrapped Relations)
 
 Aynı paragraf ve sayfa bölümünde satır sonundaki eksik bir bağıntı parçası (ör. `K=`)

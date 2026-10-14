@@ -106,15 +106,21 @@ def detect_wrapped_relations(formulas, spans):
     return groups
 
 
-def load_pdf_formulas(file_path, *, recognizer=None):
+def load_pdf_formulas(file_path, *, recognizer=None, pages=None, formula_ids=None):
     """Preserve provenance and mask native math with explicitly uncertain blocks.
 
     Without a recognizer this performs native region analysis only. A recognizer
     exposes recognize(png_bytes)->str; errors retain unresolved source regions.
+    Optional pages and formula_ids filters limit recognizer calls only.
     """
+    if recognizer is None and (pages is not None or formula_ids is not None):
+        raise ValueError("Recognition filters (--page, --formula-id) require an active recognizer")
+
     loader = PDFDocumentLoader(file_path)
     source_hash = hashlib.sha256(loader.file_path.read_bytes()).hexdigest()
-    pages, pending, page_spans = [], [], []
+    pages_list, pending, page_spans = [], [], []
+    all_groups_by_id = {}
+    all_group_by_f_id = {}
     with pymupdf.open(loader.file_path) as doc:
         for pn, page in enumerate(doc, 1):
             page.set_rotation(0)
@@ -160,7 +166,10 @@ def load_pdf_formulas(file_path, *, recognizer=None):
                 }
                 group_by_f_id[f_a['id']] = grp
                 group_by_f_id[f_b['id']] = grp
+                all_group_by_f_id[f_a['id']] = grp
+                all_group_by_f_id[f_b['id']] = grp
                 formula_groups.append(grp)
+                all_groups_by_id[grp['id']] = grp
 
             emitted = set()
             for i, span in enumerate(spans):
@@ -193,16 +202,76 @@ def load_pdf_formulas(file_path, *, recognizer=None):
                 unresolved_reason = 'no native text; image/scanned page requires review'
             if unresolved_reason:
                 blocks.append({'kind': 'warning', 'text': f'[UNRESOLVED PAGE: {unresolved_reason}]'})
-            pages.append({'page_number': pn, 'file_name': loader.file_path.name,
-                          'total_pages': len(doc), 'source_sha256': source_hash,
-                          'original_text': original, 'blocks': blocks, 'formulas': formulas,
-                          'formula_groups': formula_groups,
-                          'unresolved_reason': unresolved_reason})
+            pages_list.append({'page_number': pn, 'file_name': loader.file_path.name,
+                               'total_pages': len(doc), 'source_sha256': source_hash,
+                               'original_text': original, 'blocks': blocks, 'formulas': formulas,
+                               'formula_groups': formula_groups,
+                               'unresolved_reason': unresolved_reason})
+
+        # Selection filtering validation BEFORE any recognizer calls
+        has_filter = pages is not None or formula_ids is not None
+        if has_filter:
+            total_doc_pages = len(doc)
+            all_leaf_by_id = {f['id']: f for p in pages_list for f in p['formulas']}
+
+            # Validate pages
+            selected_pages = None
+            if pages is not None:
+                if isinstance(pages, int):
+                    pages = [pages]
+                selected_pages = list(dict.fromkeys(pages))
+                for p in selected_pages:
+                    if not isinstance(p, int) or p < 1 or p > total_doc_pages:
+                        raise ValueError(f"Selected page {p} is out of range; document has {total_doc_pages} pages (1-{total_doc_pages})")
+
+            # Validate formula_ids
+            selected_ids = None
+            if formula_ids is not None:
+                if isinstance(formula_ids, str):
+                    formula_ids = [formula_ids]
+                selected_ids = list(dict.fromkeys(formula_ids))
+                for fid in selected_ids:
+                    if fid in all_groups_by_id:
+                        cids = all_groups_by_id[fid].get('formula_ids', [])
+                        raise ValueError(f"Group ID '{fid}' cannot be recognized directly; select child leaf formula ID(s) instead: {cids}")
+                    if fid not in all_leaf_by_id:
+                        raise ValueError(f"Unknown formula ID '{fid}'; not found in native candidate inventory")
+
+            # Combined intersection & reject IDs outside selected pages
+            if selected_pages is not None and selected_ids is not None:
+                for fid in selected_ids:
+                    f_pn = all_leaf_by_id[fid]['page_number']
+                    if f_pn not in selected_pages:
+                        raise ValueError(f"Formula ID '{fid}' is on page {f_pn}, outside selected page(s): {selected_pages}")
+                target_ids = set(selected_ids)
+            elif selected_ids is not None:
+                target_ids = set(selected_ids)
+            elif selected_pages is not None:
+                target_ids = {f['id'] for p in pages_list if p['page_number'] in selected_pages for f in p['formulas']}
+            else:
+                target_ids = set(all_leaf_by_id.keys())
+
+            if not target_ids:
+                if selected_pages is not None and not selected_ids:
+                    raise ValueError(f"Empty selection: selected page(s) {selected_pages} contain no candidate formulas")
+                raise ValueError("Empty selection: no candidate formulas selected for recognition")
+
+            # Mark unselected formulas explicitly
+            for p in pages_list:
+                for f in p['formulas']:
+                    if f['id'] not in target_ids:
+                        f['recognition_status'] = 'not_requested'
+                        f['reason'] = 'not_selected_for_recognition'
+
+            pending_candidates = [p for p in pending if p[0]['id'] in target_ids]
+        else:
+            pending_candidates = pending
+
         # Prioritize radicals before the bounded worker budget is spent on small inline references.
         if recognizer:
-            for f, page_idx, review_required in sorted(pending, key=lambda p: ('√' not in p[0]['original_text'], '=' not in p[0]['original_text'])):
+            for f, page_idx, review_required in sorted(pending_candidates, key=lambda p: ('√' not in p[0]['original_text'], '=' not in p[0]['original_text'])):
                 stripped = f['original_text'].strip()
-                if f['id'] not in group_by_f_id and (len(stripped) < 2 or (len(stripped) < 3 and not any(op in stripped for op in _RELATIONAL_OPS))):
+                if f['id'] not in all_group_by_f_id and (len(stripped) < 2 or (len(stripped) < 3 and not any(op in stripped for op in _RELATIONAL_OPS))):
                     f['reason'] = 'isolated_math_reference_requires_review'
                     continue
                 try:
@@ -216,7 +285,7 @@ def load_pdf_formulas(file_path, *, recognizer=None):
                 except Exception as exc:
                     f.update(state='unresolved', recognition_status='failed',
                              reason=f'{type(exc).__name__}: {exc}')
-    for page, spans in zip(pages, page_spans):
+    for page, spans in zip(pages_list, page_spans):
         by_id = {f['id']: f for f in page['formulas']}
         for f in page['formulas']:
             check_formula_signs(f, spans)
@@ -228,6 +297,7 @@ def load_pdf_formulas(file_path, *, recognizer=None):
             grp['original_text'] = ' '.join(f['original_text'] for f in child_formulas).strip()
             has_unresolved = any(f.get('state') == 'unresolved' for f in child_formulas)
             all_returned = all(f.get('recognition_status') == 'returned' and f.get('latex') for f in child_formulas)
+            any_returned = any(f.get('recognition_status') == 'returned' and f.get('latex') for f in child_formulas)
             if all_returned:
                 grp['latex'] = ' '.join(f['latex'].strip() for f in child_formulas)
                 grp['state'] = 'unresolved' if has_unresolved else 'unverified'
@@ -236,6 +306,15 @@ def load_pdf_formulas(file_path, *, recognizer=None):
                 grp['state'] = 'unresolved'
             grp['answer_eligible'] = False
             grp['warnings'] = [w for f in child_formulas for w in f['warnings']]
+            if any_returned and not all_returned:
+                unrec = [f['id'] for f in child_formulas if f.get('recognition_status') != 'returned' or not f.get('latex')]
+                grp['warnings'].append({
+                    'code': 'partial_group_recognition',
+                    'reason': 'partial_group_recognition',
+                    'group_id': grp['id'],
+                    'page_number': grp['page_number'],
+                    'message': f"Group {grp['id']} is partially recognized; child formula(s) {unrec} were not recognized.",
+                })
             grp['sign_consistency'] = summarize_sign_checks(child_formulas)
 
         for block in page['blocks']:
@@ -255,7 +334,7 @@ def load_pdf_formulas(file_path, *, recognizer=None):
         page['detection_status'] = 'native_heuristic_incomplete'
         page['answer_eligible'] = False
         page['review_reason'] = 'native detection is incomplete; source review required for math answers'
-    return pages
+    return pages_list
 
 
 def main(argv=None):
@@ -272,13 +351,24 @@ def main(argv=None):
     parser.add_argument('--timeout', type=float, default=120, help='seconds per crop, including model load')
     parser.add_argument('--budget', type=float, default=480, help='total recognition seconds')
     parser.add_argument('--output', type=Path, help='also save full UTF-8 JSON')
+    parser.add_argument('--page', type=int, action='append', dest='pages',
+                        help='1-based page number to select for recognition (repeatable)')
+    parser.add_argument('--formula-id', type=str, action='append', dest='formula_ids',
+                        help='leaf formula ID to select for recognition (repeatable)')
     args = parser.parse_args(argv)
     try:
+        if (args.pages or args.formula_ids) and not args.recognize:
+            raise ValueError("recognition filters (--page, --formula-id) require --recognize")
         with redirect_stdout(sys.stderr):
             context = (LocalFormulaRecognizer(args.cache_dir, args.timeout, args.budget)
                        if args.recognize else nullcontext(None))
             with context as recognizer:
-                pages = load_pdf_formulas(args.pdf, recognizer=recognizer)
+                pages = load_pdf_formulas(
+                    args.pdf,
+                    recognizer=recognizer,
+                    pages=args.pages,
+                    formula_ids=args.formula_ids,
+                )
         rendered = json.dumps(pages, ensure_ascii=False, indent=2)
         if args.output:
             args.output.write_text(rendered + '\n', encoding='utf-8')
