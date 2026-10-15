@@ -9,6 +9,7 @@ import streamlit.components.v1 as components
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from src.ingestion.formula_signs import sign_warning_text
 from src.retrieval.search_pdf import format_search_results
 from src.workbench import open_upload
 
@@ -38,7 +39,7 @@ else:
 
 identity = (name, hashlib.sha256(data).hexdigest()) if data is not None else None
 if identity != st.session_state.get("identity"):
-    for key in ("document", "results", "result_question", "report_html", "load_error", "question"):
+    for key in ("document", "results", "result_question", "result_text", "report_html", "load_error", "question"):
         st.session_state.pop(key, None)
     st.session_state["identity"] = identity
     if data is not None:
@@ -69,6 +70,7 @@ with st.form("question_form"):
     submitted = st.form_submit_button("Kaynakları ara", key="search")
 if submitted:
     st.session_state.pop("results", None)
+    st.session_state.pop("result_text", None)
     try:
         st.session_state["results"] = document.search(question)
         st.session_state["result_question"] = question
@@ -83,18 +85,76 @@ if "results" in st.session_state:
     if not results:
         st.info("Çıkarılan native metinde eşleşen kaynak bulunamadı. Bu, konunun PDF'te olmadığı "
                 "anlamına gelmez. Belgedeki başka sözcükleri deneyin, sayfa metnini ve formül raporunu inceleyin.")
+    else:
+        for res in results:
+            st.subheader(f"Kaynak {res['rank']}: {res['file_name']} — Sayfa {res['page_number']} / {res['total_pages']}")
+            st.text(f"{res['rank']}. kaynak — {res['file_name']} — Sayfa {res['page_number']}")
+            context = res.get('source_context')
+            if context:
+                st.text(context['text'])
+                st.caption(context['note'])
+                if hasattr(document, "source_crop"):
+                    try:
+                        st.image(document.source_crop(res),
+                                 caption=f"Kaynak kesiti — Sayfa {res['page_number']} (yorumlanmamış native görüntü)")
+                    except Exception:
+                        pass
+            else:
+                st.text(res["excerpt"])
+            for context_key in ("field_context", "context"):
+                if res.get(context_key):
+                    st.text(f"Kaynak bağlamı ({context_key}):\n{res[context_key]}")
+            if res.get("review_reason"):
+                st.warning(f"İnceleme uyarısı: {res['review_reason']}")
+            if res.get("unresolved_reason"):
+                st.warning(f"Çözülemeyen içerik uyarısı: {res['unresolved_reason']}")
+            for formula in res.get("formulas", []):
+                check = formula.get("sign_consistency")
+                if check and check.get("status") in ("mismatch", "uncertain"):
+                    st.warning(f"Eksi işareti kontrolü ({formula['id']}): {check['status']} ({check['reason']}); formül doğrulaması değildir.")
+                warning = sign_warning_text(formula)
+                if warning:
+                    st.warning(warning.strip())
+            if res.get("formula_groups"):
+                st.warning("Uyarı: Bölünemez ilişkili formül grubu; yalnızca kaynak inceleme bağlamıdır, cevap kanıtı değildir.")
+            elif res.get("formulas"):
+                st.warning("Uyarı: Doğrulanmamış formül adayı; yalnızca kaynak inceleme bağlamıdır, cevap kanıtı değildir.")
+            with st.expander(f"Teknik ayrıntılar — Kaynak {res['rank']}"):
+                st.text(f"BM25 skoru: {res['score']:.4f} (Sıra: {res['rank']})")
+                st.text(f"Parça kimliği (Chunk ID): {res['chunk_id']}")
+                st.text(f"Kaynak sırası (Source Order): {res['source_order']}")
+                st.text(f"Kaynak SHA-256: {res['source_sha256']}")
+                st.text(f"Tespit durumu: {res['detection_status']}")
+                st.text(f"Cevap uygunluğu (Answer Eligible): {res['answer_eligible']}")
+                if res.get("math_status"):
+                    st.text(f"Matematik durumu: {res['math_status']}")
+                st.text(f"Karakter sayısı: {res.get('char_count', len(res['excerpt']))}")
+                if context:
+                    st.text(f"Kaynak kesiti kırpım alanı (bbox): {context.get('bbox')}")
+                    st.text(f"Alan ilişkilendirmesi (Association): {context.get('association')}")
+                if res.get("formula_groups"):
+                    for grp in res["formula_groups"]:
+                        st.text(f"Formül grubu {grp.get('id')}: tür={grp.get('kind')}, durum={grp.get('state')}, cevap_uygunluğu={grp.get('answer_eligible', False)}")
+                        st.text(f"  Alt formül kimlikleri: {grp.get('formula_ids')}")
+                        for child in grp.get("formulas", []):
+                            st.text(f"  - Alt formül {child.get('id')}: metin={child.get('original_text')!r}, LaTeX={child.get('latex')!r}, bbox={child.get('bbox')}, durum={child.get('state')}")
+                elif res.get("formulas"):
+                    for f in res["formulas"]:
+                        st.text(f"Formül {f.get('id')}: LaTeX={f.get('latex')!r}, durum={f.get('state')}, bbox={f.get('bbox')}")
+                        check = f.get("sign_consistency")
+                        if check:
+                            st.text(f"  Eksi işareti kontrolü: {check['status']} ({check['reason']})")
+                known_keys = {
+                    "rank", "score", "chunk_id", "source_order", "file_name", "page_number",
+                    "total_pages", "source_sha256", "excerpt", "char_count", "detection_status",
+                    "answer_eligible", "math_status", "review_reason", "unresolved_reason",
+                    "formulas", "formula_groups", "source_context", "field_context", "context"
+                }
+                for k, v in res.items():
+                    if k not in known_keys and v is not None:
+                        st.text(f"{k}: {v}")
     result_text = format_search_results(results, st.session_state["result_question"], document.file_name)
-    for result in results:
-        st.text(f"{result['rank']}. kaynak — {result['file_name']} — Sayfa {result['page_number']}")
-        context = result.get('source_context')
-        if context:
-            st.text(context['text'])
-            st.caption(context['note'])
-            st.image(document.source_crop(result),
-                     caption=f"Kaynak kesiti — Sayfa {result['page_number']} (yorumlanmamış native görüntü)")
-        else:
-            st.text(result['excerpt'])
-    st.text(result_text)
+    st.session_state["result_text"] = result_text
     st.download_button("Kaynak sonuçlarını indir (UTF-8)", result_text.encode("utf-8"),
                        file_name="sources.txt", mime="text/plain; charset=utf-8")
 
