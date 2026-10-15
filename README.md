@@ -10,10 +10,9 @@ HybridDoc AI; dijital PDF'lerin yanı sıra taranmış sayfalar, ekran görünt�
 
 ## Yerel PDF çalışma masası — hemen çalıştırın
 
-Python **3.11 veya üstü** ile, birleştirmeden sonra ana proje dizininde:
+Python **3.11 veya üstü** ile, bu repoyu klonladığınız dizinde:
 
 ```bash
-cd /home/fatih/projects/Temel_PDF_RAG
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements-workbench.txt
@@ -28,23 +27,22 @@ vektör veritabanı veya OCR kurulumu gerekmez. Streamlit isteğe bağlıdır;
 mevcut CLI komutları aynı şekilde çalışır.
 
 1. **PDF yükle** ile kendi PDF'inizi seçin veya **Demo PDF** seçin.
-2. Demo sorusu olarak `source passages` yazıp **Kaynakları ara** düğmesine basın.
-   Beklenen ilk eşleşme `workbench_demo.pdf`, **sayfa 2**:
-   `Source passages are exact quotes from the document.`
+2. Soru veya belge sözcüklerini yazıp **Kaynakları ara** düğmesine basın.
+   Demo sorgusu ve beklenen çıktılar için [demo kılavuzunu](sample_docs/workbench_demo.md) izleyin.
 3. Dosya/sayfa, hash, tam kaynak pasajı ve uyarıları okuyun. **Tam sayfa metni**
-   sekmesinden sayfa 2'yi seçin; son satır `END OF DEMO PAGE TWO` olmalıdır.
+   sekmesinden istediğiniz sayfayı seçin.
    **Sözcük sınırı parçaları** sekmesi parça metnini eksiksiz gösterir.
 4. Tam sonuçları, tüm native sayfaları ve tüm parçaları **UTF-8** indirin.
    **Formül inceleme** sekmesinde raporu açın; kaynak kırpımları ve çözülemeyen
    formül uyarıları mevcut HTML exporter ile gösterilir. HTML'i indirip daha
-   sonra çevrimdışı açabilirsiniz. Demo ve soruları [burada](sample_docs/workbench_demo.md).
+   sonra çevrimdışı açabilirsiniz.
 5. **Oturumu temizle** belgeyi, sonuçları ve raporu arayüz oturumundan kaldırır.
 
 **Gösterilen şey:** belgenin söylediği özgün metne dayalı, çıkarımsız kaynak
 araması. En fazla beş tam pasaj BM25 ile sıralanır. Sıralama puanı güven,
 doğruluk veya olasılık değildir. Sorudaki aynı sözcükleri arar; Türkçe–İngilizce
 çeviri, anlamsal arama, LLM cevabı ve formül çözümü yapmaz. İngilizce demo için
-İngilizce sözcük kullanın. `quasar` eşleşme bulmaz; bu sonuç konunun belge
+İngilizce sözcük kullanın. Eşleşme bulunmaması konunun belge
 resimlerinde bulunmadığını kanıtlamaz. Boş soru için sözcük girin; native
 metinsiz/taranmış PDF için metin katmanı olan bir kopya seçin. Genel sayfa OCR'ı
 yoktur. Aşağıdaki isteğe bağlı yerel formül OCR yolu ayrıca ve açıkça çalıştırılır.
@@ -52,13 +50,10 @@ yoktur. Aşağıdaki isteğe bağlı yerel formül OCR yolu ayrıca ve açıkça
 **Formül sınırı:** `answer_eligible=false` korunur. Native formül tespiti eksiktir;
 LaTeX adayı veya eksi işareti kontrolü formül doğruluğunu kanıtlamaz. Çözülemeyen
 bölge ve formül uyarıları kaynak sonucunda ve raporda kalır. Önceden üretilmiş
-OCR JSON'unu aynı PDF ile mevcut exporter üzerinden yeniden inceleyebilirsiniz:
+OCR JSON'unu aynı PDF ile yeniden incelemek için
+[kaydedilmiş çıkarım raporu komutunu](#2-kaydedilmiş-çıkarım-jsonu-ile-inceleme-saved-candidates--warnings) kullanın.
 
-```bash
-python -m src.evaluation.review_formulas belge.pdf --extraction extraction.json --output inceleme.html
-```
-
-**Yerellik ve saklama:** varsayılan adres yalnızca `127.0.0.1`'dir; bunu ağ adresine
+**Yerellik ve saklama:** yukarıdaki başlatma komutu yalnızca `127.0.0.1`'e bağlanır; bunu ağ adresine
 çevirmeyin. PDF/soru harici servislere gönderilmez; telemetri yukarıdaki komutta
 kapalıdır. En çok **20 MiB / 200 sayfa**, şifresiz PDF kabul edilir. Kaynak dosya
 asla değiştirilmez. Yüklemeler paylaşılan cache'e yazılmaz; her tarayıcı oturumu
@@ -102,6 +97,7 @@ Aşağıdaki yapı hedeflenen sorumlulukları gösterir; mevcut bileşenler dı�
 ```text
 RAG-OCR-proje/
 ├── apps/
+│   ├── workbench.py      # Mevcut yerel Streamlit PDF çalışma masası
 │   ├── api/              # FastAPI backend servisi
 │   └── web/              # Next.js frontend kullanıcı arayüzü
 ├── src/
@@ -319,8 +315,10 @@ Bu bağlantı sezgiseldir; cevap kanıtı olarak onaylanmaz.
 **Güven sözleşmesi:** Her formül `original_text`, `latex`, `page_number`,
 `bbox`, `source_sha256`, `recognition_status`, `state` ve `reason` taşır.
 Formül bbox'ları döndürülmemiş sayfanın koordinat sistemindedir; özgün bölge
-metni ve tanıma görüntüsü de aynı geometriyle çıkarılır. PDF dosyasının kayıtlı
-sayfa dönüşü değiştirilmez.
+metni ve tanıma görüntüsü de aynı geometriyle çıkarılır. HTML inceleme raporu,
+kaydedilmiş JSON dahil, kutuları aynı geometride doğrular ve kaynak kırpımlarını
+bu geometride üretir; grup çocuklarının kutuları da korunur. Sayfa dönüşü yalnızca
+bellekte sıfırlanır; kaynak PDF'nin baytları, kayıtlı dönüşü ve SHA-256 özeti değişmez.
 
 `unverified` modelin aday döndürdüğünü; `unresolved` tanıma yapılmadığını,
 başarısız olduğunu veya çizgili kapsam/script bağlantısının kaynak incelemesi gerektirdiğini
