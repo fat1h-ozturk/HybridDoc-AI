@@ -13,7 +13,7 @@ def test_demo_question_complete_source_report_and_clear():
     app = AppTest.from_file(str(APP)).run()
     assert not app.exception
     assert not app.text_input
-    app.radio(key="source_mode").set_value("Demo PDF").run()
+    app.radio[0].set_value("Demo PDF").run()
     assert not app.exception
     app.text_input(key="question").set_value("source passages")
     app.button(key="search").click().run()
@@ -34,7 +34,7 @@ def test_demo_question_complete_source_report_and_clear():
 
 def test_no_match_empty_question_and_independent_sessions():
     app = AppTest.from_file(str(APP)).run()
-    app.radio(key="source_mode").set_value("Demo PDF").run()
+    app.radio[0].set_value("Demo PDF").run()
     app.text_input(key="question").set_value("quasar")
     app.button(key="search").click().run()
     assert app.session_state["results"] == []

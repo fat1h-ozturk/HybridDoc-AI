@@ -24,7 +24,8 @@ if st.button("Oturumu temizle", key="clear"):
     st.session_state["upload_epoch"] = epoch
     st.rerun()
 
-mode = st.radio("Belge kaynağı", ["PDF yükle", "Demo PDF"], horizontal=True, key="source_mode")
+mode = st.radio("Belge kaynağı", ["PDF yükle", "Demo PDF"], horizontal=True,
+                key=f"source_mode-{st.session_state.get('upload_epoch', 0)}")
 if mode == "Demo PDF":
     name = "workbench_demo.pdf"
     data = (ROOT / "sample_docs" / name).read_bytes()
