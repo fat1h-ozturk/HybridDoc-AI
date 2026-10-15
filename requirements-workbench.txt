@@ -1,0 +1,4 @@
+# Minimal, optional local UI. No embeddings, vector DB, model runtime or API keys.
+pymupdf>=1.24.0
+streamlit>=1.66.0,<2
+pytest>=8.0.0
