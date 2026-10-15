@@ -1,4 +1,5 @@
-# Minimal, optional local UI. No embeddings, vector DB, model runtime or API keys.
+# Optional local UI; answer providers are off by default. No model runtime or vector DB.
 pymupdf>=1.24.0
 streamlit>=1.66.0,<2
 pytest>=8.0.0
+httpx>=0.27.0,<1

@@ -148,5 +148,5 @@ Tüm komutları repo kök dizininde `.venv/bin/python` ile çalıştırabilirsin
 ## 5. Mevcut Yetenek Sınırları ve Yol Haritası
 
 - **Formül Doğrulaması:** Matematiksel semboller ve eksi işaretleri taranmış veya dijital PDF'lerde kolayca bozulabilir. OCR adayları henüz kesin doğruluk garantisi vermediği için matematik cevapları daima doğrulanmamış (`answer_eligible=false`) kabul edilir.
-- **Model Destekli Üretim (LLM):** Model destekli yanıt üretimi (Sol entegrasyonu) ayrı bir geliştirme hattında yürütülmektedir ve şu an **beklemede (pending)** durumundadır; henüz ana koda birleştirilmemiştir.
+- **Model Destekli Üretim (LLM):** İsteğe bağlı cevap yolunun kurulumu, sağlayıcıları ve güven sınırları için [cevap üretimi kılavuzuna](grounded-answers.md) bakın.
 - **Vektör Veritabanları ve Embeddings:** Anlamsal benzerlik araması (Dense Retrieval / Chroma / Sentence Transformers) isteğe bağlı mimari alternatiflerdir; hafif yerel arama ve RAG temeli için zorunlu değildir.
