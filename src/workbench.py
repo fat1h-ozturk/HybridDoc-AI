@@ -27,7 +27,40 @@ class WorkbenchDocument:
     def search(self, question: str) -> list:
         if not tokenize(question):
             raise ValueError("Soruya en az bir sözcük yazın.")
-        return BM25Searcher(self.search_chunks).search(question, top_k=5)
+        results = BM25Searcher(self.search_chunks).search(question, top_k=5)
+        # Expand source evidence, never infer a field value from extraction order.
+        with pymupdf.open(stream=self.pdf_bytes, filetype="pdf") as pdf:
+            for result in results:
+                chunk = self.search_chunks[result['source_order'] - 1]
+                block = chunk['blocks'][0]
+                if block['kind'] != 'text' or not block.get('bbox'):
+                    continue
+                page = pdf[result['page_number'] - 1]
+                page.set_rotation(0)
+                hit = pymupdf.Rect(block['bbox'])
+                height = min(160, max(48, hit.height * 5))
+                center = (hit.y0 + hit.y1) / 2
+                band = pymupdf.Rect(page.rect.x0, center - height / 2,
+                                    page.rect.x1, center + height / 2) & page.rect
+                result['source_context'] = {
+                    'text': page.get_text('text', clip=band, sort=True).strip(),
+                    'bbox': list(band),
+                    'association': 'not_inferred',
+                    'note': ('Bu kesit çevredeki satır ve sütunları gösterir; etiket–değer '
+                             'ilişkisi otomatik seçilmez. Değer boş veya ilişki belirsizse '
+                             'bu kaynaktan kesin cevap çıkarılamaz. Kırpımı inceleyin.'),
+                }
+        return results
+
+    def source_crop(self, result: dict) -> bytes:
+        """Render only the bounded source context from this session's PDF."""
+        with pymupdf.open(stream=self.pdf_bytes, filetype="pdf") as pdf:
+            page = pdf[result['page_number'] - 1]
+            page.set_rotation(0)
+            band = pymupdf.Rect(result['source_context']['bbox']) & page.rect
+            scale = min(1.5, 1200 / band.width)
+            return page.get_pixmap(matrix=pymupdf.Matrix(scale, scale),
+                                   clip=band, alpha=False).tobytes('png')
 
     def native_export(self) -> str:
         return "\n\n".join(

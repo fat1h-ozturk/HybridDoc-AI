@@ -84,6 +84,16 @@ if "results" in st.session_state:
         st.info("Çıkarılan native metinde eşleşen kaynak bulunamadı. Bu, konunun PDF'te olmadığı "
                 "anlamına gelmez. Belgedeki başka sözcükleri deneyin, sayfa metnini ve formül raporunu inceleyin.")
     result_text = format_search_results(results, st.session_state["result_question"], document.file_name)
+    for result in results:
+        st.text(f"{result['rank']}. kaynak — {result['file_name']} — Sayfa {result['page_number']}")
+        context = result.get('source_context')
+        if context:
+            st.text(context['text'])
+            st.caption(context['note'])
+            st.image(document.source_crop(result),
+                     caption=f"Kaynak kesiti — Sayfa {result['page_number']} (yorumlanmamış native görüntü)")
+        else:
+            st.text(result['excerpt'])
     st.text(result_text)
     st.download_button("Kaynak sonuçlarını indir (UTF-8)", result_text.encode("utf-8"),
                        file_name="sources.txt", mime="text/plain; charset=utf-8")

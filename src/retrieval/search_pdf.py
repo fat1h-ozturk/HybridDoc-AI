@@ -310,6 +310,11 @@ def format_search_results(
 
         lines.append("Excerpt:")
         lines.append(res["excerpt"])
+        if res.get("source_context"):
+            context = res['source_context']
+            lines.append(f"Source context (same page, bbox={context['bbox']}):")
+            lines.append(context['text'])
+            lines.append(context['note'])
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"

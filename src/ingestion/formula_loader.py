@@ -193,7 +193,8 @@ def load_pdf_formulas(file_path, *, recognizer=None, pages=None, formula_ids=Non
                             blocks.append({'kind': 'formula', 'formula_id': f['id'], 'text': ''})
                             emitted.add(f['id'])
                 else:
-                    blocks.append({'kind': 'text', 'text': span['text']})
+                    blocks.append({'kind': 'text', 'text': span['text'],
+                                   'bbox': list(span['bbox'])})
             original = page.get_text('text').strip()
             unresolved_reason = table_error
             if page.get_images(full=True):

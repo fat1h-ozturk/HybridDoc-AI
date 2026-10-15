@@ -32,6 +32,11 @@ mevcut CLI komutları aynı şekilde çalışır.
 3. Dosya/sayfa, hash, tam kaynak pasajı ve uyarıları okuyun. **Tam sayfa metni**
    sekmesinden istediğiniz sayfayı seçin.
    **Sözcük sınırı parçaları** sekmesi parça metnini eksiksiz gösterir.
+   Metin eşleşmelerinde etiketin çevresindeki aynı sayfa kesiti, konuma göre
+   sıralanmış native metin ve kaynak görüntüsüyle gösterilir. Böylece ayrı PDF
+   metin parçalarında duran form etiketleri ve yakındaki değerler birlikte
+   incelenebilir. Kesit komşu satır/sütunları da içerir; bir etikete otomatik
+   değer atanmaz. Boş veya belirsiz alanlarda kesin cevap çıkarılamaz.
 4. Tam sonuçları, tüm native sayfaları ve tüm parçaları **UTF-8** indirin.
    **Formül inceleme** sekmesinde raporu açın; kaynak kırpımları ve çözülemeyen
    formül uyarıları mevcut HTML exporter ile gösterilir. HTML'i indirip daha
@@ -46,6 +51,13 @@ doğruluk veya olasılık değildir. Sorudaki aynı sözcükleri arar; Türkçe�
 resimlerinde bulunmadığını kanıtlamaz. Boş soru için sözcük girin; native
 metinsiz/taranmış PDF için metin katmanı olan bir kopya seçin. Genel sayfa OCR'ı
 yoktur. Aşağıdaki isteğe bağlı yerel formül OCR yolu ayrıca ve açıkça çalıştırılır.
+
+Türkçe `Adı` / `adi` gibi I/ı/İ farkları eşleşir; iyelik ekleri çözülmez
+(`babasının` otomatik olarak `baba` olmaz). Alan ararken `Baba Adı` gibi
+belgedeki sözcükleri kullanın. Diğer aksanlar kaldırılmaz (`öğrenci` ile
+`ogrenci` aynı sözcük sayılmaz). Sıralı sonuç bir kişi adı cevabı değildir.
+Kaynak kesiti en çok 160 PDF noktası yüksekliğinde ve bulunduğu sayfayla
+sınırlıdır; uzaktaki bir değeri kapsamayabilir. Tam sayfa metni ayrıca açıktır.
 
 **Formül sınırı:** `answer_eligible=false` korunur. Native formül tespiti eksiktir;
 LaTeX adayı veya eksi işareti kontrolü formül doğruluğunu kanıtlamaz. Çözülemeyen

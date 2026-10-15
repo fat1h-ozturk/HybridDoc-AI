@@ -46,3 +46,23 @@ def test_no_match_empty_question_and_independent_sessions():
     other = AppTest.from_file(str(APP)).run()
     assert "document" not in other.session_state
     assert not other.text_input
+
+
+def test_synthetic_form_shows_readable_source_band_and_crop():
+    from src.workbench import open_upload
+    from tests.form_fixtures import certificate_pdf
+
+    app = AppTest.from_file(str(APP)).run()
+    # AppTest cannot upload; inject the actual upload backend result into this session.
+    app.session_state['document'] = open_upload('invented.pdf', certificate_pdf(order='reverse'))
+    app.run()
+    app.text_input(key='question').set_value('denizin babasinin adi')
+    app.button(key='search').click().run()
+    assert not app.exception
+    father = next(r for r in app.session_state['results'] if r['excerpt'] == 'Baba Adı')
+    context = father['source_context']['text']
+    assert 'Orhan Örnek' in context
+    assert any(item.value == context for item in app.text)
+    assert any('Sayfa 1' in item.value and 'invented.pdf' in item.value for item in app.text)
+    assert any('kesin cevap çıkarılamaz' in item.value for item in app.caption)
+    assert app.get('image')
