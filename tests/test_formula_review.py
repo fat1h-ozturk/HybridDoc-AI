@@ -2,6 +2,7 @@
 
 import base64
 import hashlib
+from html.parser import HTMLParser
 import json
 from pathlib import Path
 import subprocess
@@ -32,6 +33,83 @@ class ControlledDouble:
     def recognize(self, png):
         h = hashlib.sha256(png).hexdigest()
         return self.mapping.get(h, r'\text{stub}')
+
+
+class CropImages(HTMLParser):
+    def __init__(self, content):
+        super().__init__()
+        self.images = {}
+        self.feed(content)
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == 'img' and attrs.get('class') == 'source-crop':
+            self.images[attrs['alt']] = attrs['src']
+
+
+@pytest.mark.parametrize('rotation', [0, 90, 180, 270])
+@pytest.mark.parametrize('width,height', [(595, 842), (842, 595)])
+@pytest.mark.parametrize('mode', ['native', 'saved', 'workbench'])
+def test_rotated_reports_preserve_source_crops_and_provenance(
+    tmp_path, monkeypatch, rotation, width, height, mode
+):
+    from src.workbench import open_upload
+
+    monkeypatch.setattr(tempfile, 'tempdir', str(tmp_path))
+    pdf_path = create_synthetic_benchmark_pdf(tmp_path / 'rotated.pdf')
+    with pymupdf.open(pdf_path) as doc:
+        page = doc.new_page(width=width, height=height)
+        page.insert_text((40, 70), 'x = y - 2')
+        page.insert_text((width - 100, height - 100), 'z = 9')
+        for page in doc:
+            page.set_rotation(rotation)
+        data = doc.tobytes()
+    pdf_path.write_bytes(data)
+    pages = load_pdf_formulas(pdf_path)
+    assert pages[0]['formula_groups']
+    assert len(pages[1]['formulas']) == 2
+    source_sha = hashlib.sha256(data).hexdigest()
+    extraction_json = json.dumps(pages)
+
+    if mode == 'workbench':
+        document = open_upload(pdf_path.name, data)
+        content = document.formula_report()
+        assert document.pdf_bytes == data
+        assert document.formula_pages == pages
+    else:
+        extraction_path = None
+        if mode == 'saved':
+            extraction_path = tmp_path / 'extraction.json'
+            extraction_path.write_text(extraction_json, encoding='utf-8')
+        output_path = tmp_path / 'review.html'
+        export_formula_review_html(pdf_path, output_path, extraction_path)
+        content = output_path.read_text(encoding='utf-8')
+        if extraction_path is not None:
+            assert extraction_path.read_text(encoding='utf-8') == extraction_json
+
+    images = CropImages(content).images
+    assert len(images) == sum(len(page['formulas']) for page in pages)
+    with pymupdf.open(pdf_path) as doc:
+        for page, extracted in zip(doc, pages):
+            assert page.rotation == rotation
+            page.set_rotation(0)
+            assert extracted['source_sha256'] == source_sha
+            for formula in extracted['formulas']:
+                assert formula['source_sha256'] == source_sha
+                url = images[f"Source crop for {formula['id']}"]
+                actual = pymupdf.Pixmap(base64.b64decode(url.split(',', 1)[1]))
+                expected = page.get_pixmap(
+                    matrix=pymupdf.Matrix(3, 3), clip=pymupdf.Rect(formula['bbox'])
+                )
+                assert (actual.width, actual.height) == (expected.width, expected.height)
+                assert actual.samples == expected.samples
+                assert min(actual.samples) < 255
+            for group in extracted['formula_groups']:
+                assert f'id="group-{group["id"]}"' in content
+                for child in group['formula_ids']:
+                    assert f'href="#card-{child}"' in content
+    assert source_sha in content
+    assert pdf_path.read_bytes() == data
 
 
 def test_default_native_only_extraction_has_explicit_no_ocr_labels(tmp_path):

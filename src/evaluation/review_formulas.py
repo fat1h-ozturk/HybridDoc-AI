@@ -498,6 +498,8 @@ def generate_formula_review_html(
     pdf_sha = hashlib.sha256(pdf_bytes).hexdigest()
 
     with pymupdf.open(pdf_path) as doc:
+        for page in doc:
+            page.set_rotation(0)
         total_pages = len(doc)
         if extraction_path is not None:
             extraction_file = Path(extraction_path)
