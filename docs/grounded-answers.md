@@ -9,16 +9,8 @@ Buluta otomatik geçiş yoktur. Her yeni cevap için düğmeye tekrar basmak ger
 
 ## Ortak kurulum
 
-Python 3.11+ ile:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements-workbench.txt
-python -m streamlit run apps/workbench.py --server.address 127.0.0.1 --server.maxUploadSize 20 --browser.gatherUsageStats false --client.toolbarMode minimal
-```
-
-Tarayıcıda http://127.0.0.1:8501 adresini açın. Arayüzü internete açmayın.
+[README’deki yerel çalışma masası kurulumunu](../README.md#yerel-pdf-çalışma-masası--hemen-çalıştırın)
+izleyin; arayüzü internete açmayın.
 HTTPX doğrudan bağımlılıktır; ayrıca bir sağlayıcı SDK’sı gerekmez.
 Mevcut kaynak kartları, görüntü kırpımları, sayfa/parça/formül incelemesi ve
 kaynak indirmeleri aynı şekilde kullanılabilir. Model cevabı kaynak indirmesine
@@ -84,7 +76,7 @@ seçeneği kullanmadan önce bu aktarımı değerlendirin.
    Liste uygulamaya gömülü değildir; katalog değişirse ortam listesini güncelleyin.
    Liste boşsa otomatik veya eski bir model seçilmez. Uygulama anahtar/model
    erişimini otomatik sorgulamaz; `GEMINI_API_KEY` eksikse açık yönlendirme gösterir.
-3. Ortam değişkenlerini alan terminalden yukarıdaki Streamlit komutunu çalıştırın.
+3. Ortam değişkenlerini alan terminalden README’deki Streamlit komutunu çalıştırın.
 4. Arayüzde **Gemini API**, katalogdaki model ve kaynakları seçin. Google
    gönderim açıklamasını okuyun; **bu belge için** onay kutusunu işaretleyin.
    Onay vermek tek başına istek göndermez. **Cevap üret** düğmesine basın.
@@ -107,7 +99,8 @@ Yanıt gövdesi en çok 64 KiB; üretim çıktısı en çok 1500 token istenir.
   türetilen sabit kimliği ve sayfası vardır. Dosya adı bulut içeriğine eklenmez.
 - Model cevabı `answered` veya `abstained`, cevap metni ve kaynak kimliği +
   **birebir destekleyici alıntı** döndürmelidir. Bilinmeyen kaynak, metinde olmayan
-  alıntı, boş/alıntısız cevap veya bozuk yapı reddedilir. Alıntı denetimi,
+  alıntı, boş cevap, alıntısız `answered` cevabı veya bozuk yapı reddedilir.
+  `abstained` cevabında alıntı listesi boş olabilir. Alıntı denetimi,
   cevabın anlamsal doğruluğunu ya da alıntının iddiayı desteklediğini kanıtlamaz.
   Yanıt hiçbir zaman “doğrulanmış” olarak sunulmaz; kaynak incelemesi gerekir.
 - Hiç kanıt yoksa çağrı yapılmaz. Eşleşen kaynakta sorulan bilgi yoksa modelden
