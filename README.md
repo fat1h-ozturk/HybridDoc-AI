@@ -4,7 +4,7 @@
 
 HybridDoc AI; dijital PDF'lerin yanı sıra taranmış sayfalar, ekran görüntüleri, tablolar ve şemalar içeren dokümanları işlemeyi, kaynak kanıtlarını (sayfa numarası, içerik türü, bounding box) doğrulamayı ve şeffaf referanslar sunmayı hedefleyen açık kaynaklı bir doküman zekâsı projesidir.
 
-Şu anda dijital PDF'lerden native metin çıkarma, sözcük sınırı parçalama, BM25 kaynak araması ve yerel PDF çalışma masası kullanılabilir. Embeddings, Chroma retrieval, 20 doküman sorusuyla değerlendirme ve LLM cevap üretimi sonraki geliştirme adımlarıdır. İsteğe bağlı yerel formül çıkarma aşağıda açıklanmıştır; genel sayfa OCR ve multimodal cevaplama henüz uygulanmamıştır.
+Şu anda dijital PDF'lerden native metin çıkarma, sözcük sınırı parçalama, BM25 kaynak araması ve yerel PDF çalışma masası kullanılabilir. İsteğe bağlı, kaynak alıntılarını denetleyen Ollama/Gemini cevap üretimi ilk entegrasyon olarak kullanılabilir. Embeddings, Chroma retrieval ve 20 doküman sorusuyla değerlendirme sonraki geliştirme adımlarıdır. İsteğe bağlı yerel formül çıkarma aşağıda açıklanmıştır; genel sayfa OCR ve multimodal cevaplama henüz uygulanmamıştır.
 
 Sistemin mimarisini, uçtan uca veri akışını ve koordinat temelli çalışma prensiplerini adım adım incelemek için [Mimari Rehber (Architecture Walkthrough)](docs/architecture_walkthrough.md) dokümanına göz atabilirsiniz.
 
@@ -48,7 +48,7 @@ mevcut CLI komutları aynı şekilde çalışır.
 **Gösterilen şey:** belgenin söylediği özgün metne dayalı, çıkarımsız kaynak
 araması. En fazla beş tam pasaj BM25 ile sıralanır. Sıralama puanı güven,
 doğruluk veya olasılık değildir. Sorudaki aynı sözcükleri arar; Türkçe–İngilizce
-çeviri, anlamsal arama, LLM cevabı ve formül çözümü yapmaz. İngilizce demo için
+çeviri, anlamsal arama veya formül çözümü yapmaz. İsteğe bağlı LLM cevabı ayrı ve açık bir eylemdir; aşağıdaki kılavuza bakın. İngilizce demo için
 İngilizce sözcük kullanın. Eşleşme bulunmaması konunun belge
 resimlerinde bulunmadığını kanıtlamaz. Boş soru için sözcük girin; native
 metinsiz/taranmış PDF için metin katmanı olan bir kopya seçin. Genel sayfa OCR'ı
@@ -68,7 +68,7 @@ OCR JSON'unu aynı PDF ile yeniden incelemek için
 [kaydedilmiş çıkarım raporu komutunu](#2-kaydedilmiş-çıkarım-jsonu-ile-inceleme-saved-candidates--warnings) kullanın.
 
 **Yerellik ve saklama:** yukarıdaki başlatma komutu yalnızca `127.0.0.1`'e bağlanır; bunu ağ adresine
-çevirmeyin. PDF/soru harici servislere gönderilmez; telemetri yukarıdaki komutta
+çevirmeyin. Varsayılan kaynak incelemesinde PDF/soru harici servislere gönderilmez. İsteğe bağlı Gemini cevabında yalnızca açık onay ve düğmeyle soru/seçili kaynaklar Google’a gider; [cevap üretimi kılavuzunu](docs/grounded-answers.md) okuyun. Telemetri yukarıdaki komutta
 kapalıdır. En çok **20 MiB / 200 sayfa**, şifresiz PDF kabul edilir. Kaynak dosya
 asla değiştirilmez. Yüklemeler paylaşılan cache'e yazılmaz; her tarayıcı oturumu
 kendi belleğini kullanır. Ayrıştırma ve rapor sırasında rastgele, özel geçici
@@ -86,6 +86,13 @@ python -m pytest -q
 ```
 
 ---
+
+## İsteğe bağlı cevap üretimi
+
+**Ollama (yerel varsayılan) ve Gemini API**, her biri içinde model seçimiyle
+kullanılabilir. Varsayılan kapalıdır; yalnızca **Cevap üret** düğmesi istek
+gönderir. Google için belgeye özel açık onay gerekir.
+[Türkçe kurulum, kaynak önizlemesi, sınırlar ve çevrimdışı simülasyon](docs/grounded-answers.md).
 
 ## 🎯 Proje Hedefleri ve Aşamalar
 

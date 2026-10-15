@@ -12,12 +12,14 @@ sys.path.insert(0, str(ROOT))
 from src.ingestion.formula_signs import sign_warning_text
 from src.retrieval.search_pdf import format_search_results
 from src.workbench import open_upload
+from src.answer_ui import render_answer_panel
 
 st.set_page_config(page_title="HybridDoc — Yerel PDF", layout="wide")
 st.title("HybridDoc — Yerel PDF çalışma masası")
-st.caption("PDF → soru → eksiksiz kaynak pasajları. İşlem bu bilgisayarda yapılır.")
+st.caption("PDF → soru → kaynak pasajları. Arama bu bilgisayarda yapılır; cevap üretimi isteğe bağlıdır.")
 st.info("Bu arayüz belgenin söylediği metni gösterir: sözcük eşleşmesine dayalı kaynak aramasıdır. "
-        "LLM cevabı üretmez; çeviri veya anlamsal arama yapmaz. Aynı dildeki belge sözcüklerini kullanın.")
+        "Arama çeviri veya anlamsal arama yapmaz. Aynı dildeki belge sözcüklerini kullanın. "
+        "İsteğe bağlı model cevabı yalnızca seçili kaynakları kullanır; BM25 eşleşme sorununu çözmez.")
 
 if st.button("Oturumu temizle", key="clear"):
     epoch = st.session_state.get("upload_epoch", 0) + 1
@@ -39,7 +41,8 @@ else:
 
 identity = (name, hashlib.sha256(data).hexdigest()) if data is not None else None
 if identity != st.session_state.get("identity"):
-    for key in ("document", "results", "result_question", "result_text", "report_html", "load_error", "question"):
+    for key in ("document", "results", "result_question", "result_text", "report_html", "load_error", "question",
+                "generated_answer", "answer_error", "answer_scope", "cloud_consent", "answer_sources"):
         st.session_state.pop(key, None)
     st.session_state["identity"] = identity
     if data is not None:
@@ -69,6 +72,8 @@ with st.form("question_form"):
     question = st.text_input("Soru / belge sözcükleri", key="question")
     submitted = st.form_submit_button("Kaynakları ara", key="search")
 if submitted:
+    for key in ("generated_answer", "answer_error", "answer_scope", "answer_sources"):
+        st.session_state.pop(key, None)
     st.session_state.pop("results", None)
     st.session_state.pop("result_text", None)
     try:
@@ -87,7 +92,7 @@ if "results" in st.session_state:
                 "anlamına gelmez. Belgedeki başka sözcükleri deneyin, sayfa metnini ve formül raporunu inceleyin.")
     else:
         for res in results:
-            st.subheader(f"Kaynak {res['rank']}: {res['file_name']} — Sayfa {res['page_number']} / {res['total_pages']}")
+            st.subheader(f"Kaynak {res['rank']} — Sayfa {res['page_number']} / {res['total_pages']}")
             st.text(f"{res['rank']}. kaynak — {res['file_name']} — Sayfa {res['page_number']}")
             context = res.get('source_context')
             if context:
@@ -157,6 +162,9 @@ if "results" in st.session_state:
     st.session_state["result_text"] = result_text
     st.download_button("Kaynak sonuçlarını indir (UTF-8)", result_text.encode("utf-8"),
                        file_name="sources.txt", mime="text/plain; charset=utf-8")
+
+if "results" in st.session_state:
+    render_answer_panel(st.session_state["results"], st.session_state["result_question"])
 
 native_tab, chunk_tab, formula_tab = st.tabs(["Tam sayfa metni", "Sözcük sınırı parçaları", "Formül inceleme"])
 with native_tab:
