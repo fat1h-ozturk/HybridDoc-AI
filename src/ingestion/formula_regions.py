@@ -3,10 +3,33 @@ import re
 import pymupdf
 
 
+_PROSE_STOPWORDS = {
+    'in', 'on', 'at', 'to', 'is', 'of', 'by', 'for', 'and', 'the', 'with', 'from',
+    've', 'ile', 'bir', 'ise', 'her', 'için', 'olan', 'olarak', 'gibi', 'kadar',
+}
+
+
 def _math_text(text, font):
     return ('math' in font.lower() or any(0x1D400 <= ord(c) <= 0x1D7FF for c in text)
             or any(c in text for c in '√∂∫∑∏′″‴')
             or bool(re.search(r"[A-Za-z0-9)|\]\}](?:['′″])*\s*[=≠≤≥≈<>]", text)))
+
+
+def _is_math_operand(text):
+    t = text.strip()
+    if not t or len(t) > 20:
+        return False
+    has_math_op = any(c in t for c in '+-*/=≠≤≥≈<>±×÷·^√|()[]')
+    words = [w.lower() for w in re.split(r'[^A-Za-zÇĞİÖŞÜçğıöşü]+', t) if w]
+    if any(w in _PROSE_STOPWORDS for w in words):
+        return False
+    if any(len(w) >= 4 and w not in {'sin', 'cos', 'tan', 'log', 'exp', 'lim', 'det'} for w in words):
+        return False
+    if has_math_op:
+        return True
+    if not any(c.isspace() for c in t) and len(t) <= 8:
+        return len(t) == 1 or t.isdigit() or not words or len(words[0]) <= 2
+    return False
 
 
 def _near(a, b, size):
@@ -27,7 +50,7 @@ def _has_omitted_interval(a, b, spans):
             s = spans[k]
             if not merged_box.contains(s['bbox']):
                 return True
-            if not s['math'] and len(s['text'].strip()) > 8:
+            if not s['math'] and len(s['text'].strip()) > 8 and not _is_math_operand(s['text']):
                 return True
     return False
 
@@ -93,16 +116,32 @@ def propose_regions(page):
     rules = []
     for drawing in page.get_drawings():
         for item in drawing['items']:
+            rule = None
             if item[0] == 'l':
                 a, b = item[1:]
-                if abs(a.y - b.y) < .1 and abs(a.x - b.x) > 2:
-                    rule = pymupdf.Rect(min(a.x, b.x), a.y, max(a.x, b.x), a.y)
-                    if not any(rule.x0 < c['bbox'].x1 and rule.x1 > c['bbox'].x0
-                               and (abs(rule.y0-c['bbox'].y0) < 1
-                                    or abs(rule.y0-c['bbox'].y1) < 1) for c in cells):
-                        cell = next((c for c in cells if c['bbox'].contains(
-                            pymupdf.Point((rule.x0+rule.x1)/2, rule.y0))), None)
-                        rules.append((rule, cell))
+                if abs(a.y - b.y) < .5 and abs(a.x - b.x) > 2:
+                    mid_y = (a.y + b.y) / 2
+                    rule = pymupdf.Rect(min(a.x, b.x), mid_y, max(a.x, b.x), mid_y)
+            elif item[0] == 're':
+                r = item[1]
+                if r.height <= 2.5 and r.width > 2:
+                    mid_y = (r.y0 + r.y1) / 2
+                    rule = pymupdf.Rect(r.x0, mid_y, r.x1, mid_y)
+            if rule is not None:
+                if not any(rule.x0 < c['bbox'].x1 and rule.x1 > c['bbox'].x0
+                           and (abs(rule.y0-c['bbox'].y0) < 1
+                                or abs(rule.y0-c['bbox'].y1) < 1) for c in cells):
+                    cell = next((c for c in cells if c['bbox'].contains(
+                        pymupdf.Point((rule.x0+rule.x1)/2, rule.y0))), None)
+                    rules.append((rule, cell))
+    unique_rules = []
+    for rule, cell in rules:
+        if not any(abs(rule.x0 - u.x0) < 0.5 and abs(rule.x1 - u.x1) < 0.5
+                   and abs(rule.y0 - u.y0) < 0.5 and cell == u_cell
+                   for u, u_cell in unique_rules):
+            unique_rules.append((rule, cell))
+    rules = unique_rules
+
     regions = []
     # A bar with glyphs on both sides is evidence of math, not its interpretation.
     math_rules = []
@@ -114,13 +153,36 @@ def propose_regions(page):
             box = s['bbox']
             if box.x0 < rule.x1 and box.x1 > rule.x0:
                 cy = (box.y0 + box.y1) / 2
-                if abs(cy - rule.y0) < 1.5 * s['size']:
+                if abs(cy - rule.y0) <= 2.2 * max(s['size'], 8.0):
                     (above if cy < rule.y0 else below).append(i)
-        if above and below and rule.width < .8 * page.rect.width:
+
+        rad_spans = [i for i, s in enumerate(spans) if '√' in s['text']
+                     and (s['bbox'].x0 - 2 <= rule.x0 <= s['bbox'].x1 + 15)
+                     and abs(s['bbox'].y0 - rule.y0) <= max(s['size'] * 0.4, 5.0)]
+        if rad_spans and below and rule.width < .8 * page.rect.width:
+            deg_spans = [i for i in above if spans[i]['bbox'].x0 <= rule.x0 + 10 and len(spans[i]['text'].strip()) <= 4]
+            all_rad = set(below + rad_spans + deg_spans)
+            for i in all_rad:
+                spans[i]['math'] = True
+            if cell is None:
+                box = pymupdf.Rect(rule.x0, rule.y0-.05, rule.x1, rule.y0+.05)
+                for i in all_rad:
+                    box |= spans[i]['bbox']
+                regions.append({'bbox': box, 'span_ids': all_rad,
+                                'size': max(spans[i]['size'] for i in all_rad),
+                                'cell': None})
+            math_rules.append((rule, cell, all_rad))
+        elif above and below and rule.width < .8 * page.rect.width:
             min_dist_above = min(rule.y0 - (spans[i]['bbox'].y0 + spans[i]['bbox'].y1) / 2 for i in above)
-            above = [i for i in above if (rule.y0 - (spans[i]['bbox'].y0 + spans[i]['bbox'].y1) / 2) <= min_dist_above + 3.0]
+            max_size_above = max(spans[i]['size'] for i in above)
+            max_tol_above = max(6.0, 0.75 * max_size_above)
+            above = [i for i in above if (rule.y0 - (spans[i]['bbox'].y0 + spans[i]['bbox'].y1) / 2) <= min_dist_above + max_tol_above]
+
             min_dist_below = min((spans[i]['bbox'].y0 + spans[i]['bbox'].y1) / 2 - rule.y0 for i in below)
-            below = [i for i in below if ((spans[i]['bbox'].y0 + spans[i]['bbox'].y1) / 2 - rule.y0) <= min_dist_below + 3.0]
+            max_size_below = max(spans[i]['size'] for i in below)
+            max_tol_below = max(6.0, 0.75 * max_size_below)
+            below = [i for i in below if ((spans[i]['bbox'].y0 + spans[i]['bbox'].y1) / 2 - rule.y0) <= min_dist_below + max_tol_below]
+
             for i in above + below:
                 spans[i]['math'] = True
             if cell is None:
@@ -131,21 +193,6 @@ def propose_regions(page):
                                 'size': max(spans[i]['size'] for i in above + below),
                                 'cell': None})
             math_rules.append((rule, cell, set(above + below)))
-        elif not above and below and rule.width < .8 * page.rect.width:
-            # Radical vinculum: horizontal bar following radical symbol covers radicand spans below
-            rad_spans = [i for i, s in enumerate(spans) if '√' in s['text'] and s['bbox'].x0 <= rule.x0 <= s['bbox'].x1 + 15
-                         and abs(s['bbox'].y0 - rule.y0) <= 2.5 * s['size']]
-            if rad_spans:
-                for i in below + rad_spans:
-                    spans[i]['math'] = True
-                if cell is None:
-                    box = pymupdf.Rect(rule.x0, rule.y0-.05, rule.x1, rule.y0+.05)
-                    for i in below + rad_spans:
-                        box |= spans[i]['bbox']
-                    regions.append({'bbox': box, 'span_ids': set(below + rad_spans),
-                                    'size': max(spans[i]['size'] for i in below + rad_spans),
-                                    'cell': None})
-                math_rules.append((rule, cell, set(below + rad_spans)))
     for i, s in enumerate(spans):
         cell = s['cell']
         if not s['math'] or any(i in r['span_ids'] for r in regions):
@@ -167,8 +214,7 @@ def propose_regions(page):
             if r['cell']:
                 inside = r['bbox'].contains(s['bbox'])
             else:
-                is_operand = (s['math'] or s['script'] or
-                              (len(s['text'].strip()) <= 8 and not any(c.isspace() for c in s['text'].strip())))
+                is_operand = (s['math'] or s['script'] or _is_math_operand(s['text']))
                 inside = (s['cell'] is None and is_operand and
                           _near(r['bbox'], s['bbox'], r['size']) and
                           not _has_omitted_interval(r, {'span_ids': {i}, 'bbox': s['bbox']}, spans))
