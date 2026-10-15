@@ -4,7 +4,72 @@
 
 HybridDoc AI; dijital PDF'lerin yanı sıra taranmış sayfalar, ekran görüntüleri, tablolar ve şemalar içeren dokümanları işlemeyi, kaynak kanıtlarını (sayfa numarası, içerik türü, bounding box) doğrulamayı ve şeffaf referanslar sunmayı hedefleyen açık kaynaklı bir doküman zekâsı projesidir.
 
-Şu anda dijital PDF'lerden sayfa metni ve kaynak metaverisi çıkarma ile aşağıda açıklanan metin parçalama bileşeni mevcuttur. Embeddings, Chroma retrieval, 20 doküman sorusuyla değerlendirme, LLM ve kullanıcı arayüzü sonraki geliştirme adımlarıdır. İsteğe bağlı yerel formül çıkarma aşağıda açıklanmıştır; genel sayfa OCR ve multimodal cevaplama henüz uygulanmamıştır.
+Şu anda dijital PDF'lerden native metin çıkarma, sözcük sınırı parçalama, BM25 kaynak araması ve yerel PDF çalışma masası kullanılabilir. Embeddings, Chroma retrieval, 20 doküman sorusuyla değerlendirme ve LLM cevap üretimi sonraki geliştirme adımlarıdır. İsteğe bağlı yerel formül çıkarma aşağıda açıklanmıştır; genel sayfa OCR ve multimodal cevaplama henüz uygulanmamıştır.
+
+---
+
+## Yerel PDF çalışma masası — hemen çalıştırın
+
+Python **3.11 veya üstü** ile, bu repoyu klonladığınız dizinde:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements-workbench.txt
+python -m streamlit run apps/workbench.py --server.address 127.0.0.1 --server.maxUploadSize 20 --browser.gatherUsageStats false --client.toolbarMode minimal
+```
+
+Son satır arayüzü başlatır; tarayıcı otomatik açılmazsa terminaldeki
+**http://127.0.0.1:8501** adresini açın. Port doluysa aynı komuta
+`--server.port 8502` ekleyin. Durdurmak için terminalde `Ctrl+C` kullanın.
+Bu arayüz için büyük `requirements.txt`, `.env`, API anahtarı, model indirme,
+vektör veritabanı veya OCR kurulumu gerekmez. Streamlit isteğe bağlıdır;
+mevcut CLI komutları aynı şekilde çalışır.
+
+1. **PDF yükle** ile kendi PDF'inizi seçin veya **Demo PDF** seçin.
+2. Soru veya belge sözcüklerini yazıp **Kaynakları ara** düğmesine basın.
+   Demo sorgusu ve beklenen çıktılar için [demo kılavuzunu](sample_docs/workbench_demo.md) izleyin.
+3. Dosya/sayfa, hash, tam kaynak pasajı ve uyarıları okuyun. **Tam sayfa metni**
+   sekmesinden istediğiniz sayfayı seçin.
+   **Sözcük sınırı parçaları** sekmesi parça metnini eksiksiz gösterir.
+4. Tam sonuçları, tüm native sayfaları ve tüm parçaları **UTF-8** indirin.
+   **Formül inceleme** sekmesinde raporu açın; kaynak kırpımları ve çözülemeyen
+   formül uyarıları mevcut HTML exporter ile gösterilir. HTML'i indirip daha
+   sonra çevrimdışı açabilirsiniz.
+5. **Oturumu temizle** belgeyi, sonuçları ve raporu arayüz oturumundan kaldırır.
+
+**Gösterilen şey:** belgenin söylediği özgün metne dayalı, çıkarımsız kaynak
+araması. En fazla beş tam pasaj BM25 ile sıralanır. Sıralama puanı güven,
+doğruluk veya olasılık değildir. Sorudaki aynı sözcükleri arar; Türkçe–İngilizce
+çeviri, anlamsal arama, LLM cevabı ve formül çözümü yapmaz. İngilizce demo için
+İngilizce sözcük kullanın. Eşleşme bulunmaması konunun belge
+resimlerinde bulunmadığını kanıtlamaz. Boş soru için sözcük girin; native
+metinsiz/taranmış PDF için metin katmanı olan bir kopya seçin. Genel sayfa OCR'ı
+yoktur. Aşağıdaki isteğe bağlı yerel formül OCR yolu ayrıca ve açıkça çalıştırılır.
+
+**Formül sınırı:** `answer_eligible=false` korunur. Native formül tespiti eksiktir;
+LaTeX adayı veya eksi işareti kontrolü formül doğruluğunu kanıtlamaz. Çözülemeyen
+bölge ve formül uyarıları kaynak sonucunda ve raporda kalır. Önceden üretilmiş
+OCR JSON'unu aynı PDF ile yeniden incelemek için
+[kaydedilmiş çıkarım raporu komutunu](#2-kaydedilmiş-çıkarım-jsonu-ile-inceleme-saved-candidates--warnings) kullanın.
+
+**Yerellik ve saklama:** yukarıdaki başlatma komutu yalnızca `127.0.0.1`'e bağlanır; bunu ağ adresine
+çevirmeyin. PDF/soru harici servislere gönderilmez; telemetri yukarıdaki komutta
+kapalıdır. En çok **20 MiB / 200 sayfa**, şifresiz PDF kabul edilir. Kaynak dosya
+asla değiştirilmez. Yüklemeler paylaşılan cache'e yazılmaz; her tarayıcı oturumu
+kendi belleğini kullanır. Ayrıştırma ve rapor sırasında rastgele, özel geçici
+dizin kullanılır ve işlem başarılı ya da hatalı bittiğinde silinir. Uygulama
+kapanınca bellekteki içerik gider; indirdiğiniz dosyalar size aittir.
+Normal silme güvenli disk silme garantisi vermez; zorla süreç öldürmede işletim
+sisteminin geçici dizininde bir kopya kalabilir. Büyük/grafik yoğun dosyalarda
+native analiz ve HTML kırpımları zaman ve RAM kullanabilir; doğruluk garantisi yoktur.
+
+Tekrarlanabilir yerel duman testi ve tüm testler (model/ağ gerekmez):
+
+```bash
+python -m pytest tests/test_workbench.py tests/test_workbench_ui.py -q
+python -m pytest -q
+```
 
 ---
 
@@ -32,6 +97,7 @@ Aşağıdaki yapı hedeflenen sorumlulukları gösterir; mevcut bileşenler dı�
 ```text
 RAG-OCR-proje/
 ├── apps/
+│   ├── workbench.py      # Mevcut yerel Streamlit PDF çalışma masası
 │   ├── api/              # FastAPI backend servisi
 │   └── web/              # Next.js frontend kullanıcı arayüzü
 ├── src/
@@ -249,8 +315,10 @@ Bu bağlantı sezgiseldir; cevap kanıtı olarak onaylanmaz.
 **Güven sözleşmesi:** Her formül `original_text`, `latex`, `page_number`,
 `bbox`, `source_sha256`, `recognition_status`, `state` ve `reason` taşır.
 Formül bbox'ları döndürülmemiş sayfanın koordinat sistemindedir; özgün bölge
-metni ve tanıma görüntüsü de aynı geometriyle çıkarılır. PDF dosyasının kayıtlı
-sayfa dönüşü değiştirilmez.
+metni ve tanıma görüntüsü de aynı geometriyle çıkarılır. HTML inceleme raporu,
+kaydedilmiş JSON dahil, kutuları aynı geometride doğrular ve kaynak kırpımlarını
+bu geometride üretir; grup çocuklarının kutuları da korunur. Sayfa dönüşü yalnızca
+bellekte sıfırlanır; kaynak PDF'nin baytları, kayıtlı dönüşü ve SHA-256 özeti değişmez.
 
 `unverified` modelin aday döndürdüğünü; `unresolved` tanıma yapılmadığını,
 başarısız olduğunu veya çizgili kapsam/script bağlantısının kaynak incelemesi gerektirdiğini
