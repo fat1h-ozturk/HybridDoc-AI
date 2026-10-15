@@ -6,6 +6,8 @@ HybridDoc AI; dijital PDF'lerin yanı sıra taranmış sayfalar, ekran görünt�
 
 Şu anda dijital PDF'lerden native metin çıkarma, sözcük sınırı parçalama, BM25 kaynak araması ve yerel PDF çalışma masası kullanılabilir. Embeddings, Chroma retrieval, 20 doküman sorusuyla değerlendirme ve LLM cevap üretimi sonraki geliştirme adımlarıdır. İsteğe bağlı yerel formül çıkarma aşağıda açıklanmıştır; genel sayfa OCR ve multimodal cevaplama henüz uygulanmamıştır.
 
+Sistemin mimarisini, uçtan uca veri akışını ve koordinat temelli çalışma prensiplerini adım adım incelemek için [Mimari Rehber (Architecture Walkthrough)](docs/architecture_walkthrough.md) dokümanına göz atabilirsiniz.
+
 ---
 
 ## Yerel PDF çalışma masası — hemen çalıştırın
