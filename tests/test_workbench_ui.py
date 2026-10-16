@@ -470,3 +470,42 @@ def test_simulated_split_field_mixed_sources_explicit_action_and_reset(monkeypat
     app.multiselect(key='answer_sources').set_value([s['id'] for s in answers.build_evidence(app.session_state['results'])[0]]).run()
     assert app.button(key='generate_answer').disabled
     assert len(calls) == 1
+
+
+def test_simulated_configured_no_colon_duplicate_values_cannot_be_selected_as_prose(monkeypatch):
+    """OFFLINE SIMULATION: configured Gemini UI with invented PDF and fake HTTP."""
+    import json
+    import httpx
+    from src import answers
+    from src.workbench import open_upload
+    from tests.test_explicit_fields import native_pdf
+
+    monkeypatch.setenv('GEMINI_API_KEY', 'offline-simulation-key')
+    monkeypatch.setenv('HYBRIDDOC_GEMINI_MODELS', 'gemini-3.8-flash')
+    def forbidden(request):
+        pytest.fail('ambiguous no-colon form must not contact simulated provider')
+    real_client = httpx.Client
+    monkeypatch.setattr(answers.httpx, 'Client', lambda **kw: real_client(**{**kw, 'transport': httpx.MockTransport(forbidden)}))
+    data = native_pdf([(35,100,'Baba Adı'),(185,100,'Deniz.'),
+                       (35,130,'Baba Adı'),(185,130,'Orhan.')])
+    app = AppTest.from_file(str(APP)).run()
+    app.session_state['document'] = open_upload('synthetic.pdf', data)
+    app.run()
+    app.text_input(key='question').set_value('Baba Adı Deniz')
+    app.button(key='search').click().run()
+    app.checkbox(key='generation_enabled').check().run()
+    app.selectbox(key='answer_provider').select('Gemini API').run()
+    app.checkbox(key='cloud_consent').check().run()
+    assert not app.exception
+    assert app.selectbox(key='gemini_model').value == 'gemini-3.8-flash'
+    assert any(r['excerpt'] == 'Deniz.' for r in app.session_state['results'])
+    assert app.multiselect(key='answer_sources').value == []
+    assert app.button(key='generate_answer').disabled
+    assert any('Alan ilişkisi belirsiz' in w.value for w in app.warning)
+    evidence, _ = answers.build_evidence(app.session_state['results'])
+    for item in evidence:
+        app.multiselect(key='answer_sources').set_value([item['id']]).run()
+        assert not app.exception and app.button(key='generate_answer').disabled
+        preview = next(t.value for t in app.text if t.value.startswith('{\n  "question"'))
+        assert json.loads(preview)['sources'] == [item]
+    assert 'generated_answer' not in app.session_state

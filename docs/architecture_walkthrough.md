@@ -74,6 +74,8 @@ flowchart TD
   ```
 - **Kesit metadatası:** Kaynak bandıyla örtüşen mevcut formül kayıtları ve bu
   formülleri içeren gruplar, güven bayrakları değiştirilmeden sonuçta korunur.
+  Tam native satırda hit kutusu dışında span varsa `has_row_peers` kaydedilir;
+  açık alan ilişkisi olmayan böyle bir değer noktalama ile düz cümle sayılmaz.
 - **`source_crop()`:** İlgili koordinat bandını PyMuPDF ile piksel görüntüsüne (`pixmap`) dönüştürür.
 - **İlişkilendirme:** `src/field_evidence.py` yalnızca native yatay tek satırdaki
   açık `Etiket: Değer` ilişkisini `association: "explicit_same_row"` olarak kaydeder.

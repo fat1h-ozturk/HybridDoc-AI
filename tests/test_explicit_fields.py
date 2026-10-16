@@ -212,6 +212,41 @@ def test_punctuated_ambiguous_value_is_blocked_before_simulated_http(provider):
         assert answers.evidence_issue([{**item, 'requires_source_review': False}])
 
 
+@pytest.mark.parametrize('rotation', [0, 90, 180, 270])
+@pytest.mark.parametrize('value_on_left', [False, True])
+@pytest.mark.parametrize('value', ['Deniz', 'Orhan'])
+def test_no_colon_duplicate_values_stay_ambiguous(rotation, value_on_left, value):
+    import hashlib
+
+    label_x, value_x = (185, 35) if value_on_left else (35, 185)
+    entries = [(label_x,100,'Baba Adı'),(value_x,100,'Deniz.'),
+               (label_x,130,'Baba Adı'),(value_x,130,'Orhan.')]
+    data = native_pdf(entries, rotation=rotation)
+    doc, results, evidence = evidence_for(data, f'Baba Adı {value}')
+    assert any(r['excerpt'] == value + '.' for r in results)
+    assert evidence and all(e['requires_source_review'] for e in evidence)
+    assert all(e['association'] == 'not_inferred' for e in evidence)
+    with pymupdf.open(stream=data, filetype='pdf') as pdf:
+        page = pdf[0]
+        page.set_rotation(0)
+        for result, item in zip(results, evidence):
+            context = result['source_context']
+            assert context['text'] == page.get_text('text', clip=pymupdf.Rect(context['bbox']), sort=True).strip()
+            assert item['text'] == context['text']
+            assert item['page'] == result['page_number'] == 1
+            assert item['source_sha256'] == hashlib.sha256(data).hexdigest()
+            assert item['answer_eligible'] is False
+            assert pymupdf.Pixmap(doc.source_crop(result)).width > 0
+    def forbidden(request):
+        pytest.fail('ambiguous no-colon value must not reach simulated HTTP')
+    for item in evidence:
+        assert answers.evidence_issue([item])
+        for provider in ('Ollama', 'Gemini API'):
+            with pytest.raises(answers.AnswerError, match='association=not_inferred'):
+                answers.generate_answer(provider, 'simulated', f'Baba Adı {value}', [item],
+                                        consent=True, transport=httpx.MockTransport(forbidden))
+
+
 @pytest.mark.parametrize('rotation', [0,90,180,270])
 @pytest.mark.parametrize('provider', ['Ollama', 'Gemini API'])
 def test_split_square_root_field_blocks_before_simulated_http(rotation, provider):
