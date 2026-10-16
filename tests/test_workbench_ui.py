@@ -552,6 +552,15 @@ def test_simulated_configured_prose_generates_only_on_click(monkeypatch, prose):
     assert not calls and app.button(key='generate_answer').disabled
     app.checkbox(key='cloud_consent').check().run()
     assert not app.exception and not calls
+    if prose == 'wrapped':
+        assert app.multiselect(key='answer_sources').value == []
+        sid = answers.build_evidence(app.session_state['results'])[0][0]['id']
+        app.multiselect(key='answer_sources').set_value([sid]).run()
+        assert app.button(key='generate_answer').disabled
+        app.selectbox(key='relation_label_' + sid).select('Ankara is the capital of Turkey and').run()
+        app.selectbox(key='relation_value_' + sid).select('a major city.').run()
+        app.button(key='confirm_relation_' + sid).click().run()
+        assert not calls
     assert len(app.multiselect(key='answer_sources').value) == 1
     assert not app.button(key='generate_answer').disabled
     preview = next(t.value for t in app.text if t.value.startswith('{\n  "question"'))

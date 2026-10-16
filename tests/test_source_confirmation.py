@@ -21,6 +21,86 @@ def ambiguous_evidence():
     return evidence
 
 
+@pytest.mark.parametrize('native_block,gap,value', [
+    (False, 40, 'Deniz Örnek.'), (False, 20, 'Deniz Örnek.'),
+    (True, 20, 'Deniz.'), (True, 20, 'Deniz Örnek.')])
+def test_stacked_values_require_confirmation_regardless_of_words_or_native_block(native_block, gap, value):
+    from tests.test_explicit_fields import native_pdf
+    entries = ([(35, 100, 'Baba Adı\n' + value), (35, 220, 'Baba Adı\nOrhan Örnek.')]
+               if native_block else [(35, 100, 'Baba Adı'), (35, 100 + gap, value),
+                                     (35, 220, 'Baba Adı'), (35, 220 + gap, 'Orhan Örnek.')])
+    document = open_upload('invented.pdf', native_pdf(entries))
+    question = 'Baba Adı Deniz'
+    results = document.search(question)
+    hit = next(r for r in results if r['excerpt'] == value)
+    evidence, _ = answers.build_evidence([hit])
+    original = copy.deepcopy(evidence[0])
+    assert evidence[0]['association'] == 'not_inferred'
+    assert evidence[0]['requires_source_review']
+    assert answers.evidence_issue(evidence, question=question)
+    for provider in ('Ollama', 'Gemini API'):
+        with pytest.raises(answers.AnswerError, match='association=not_inferred'):
+            answers.generate_answer(provider, 'simulated', question, evidence, consent=True,
+                                    transport=httpx.MockTransport(lambda r: pytest.fail('unconfirmed source sent HTTP')))
+    if 'Baba Adı' in answers.relation_choices(evidence[0]):
+        evidence[0]['user_confirmation'] = answers.confirm_source_relation(
+            evidence, evidence[0]['id'], question, 'Baba Adı', value)
+        assert answers.evidence_issue(evidence, question=question) is None
+        assert {k: v for k, v in evidence[0].items() if k != 'user_confirmation'} == original
+        reply = dict(status='answered', answer='SİMÜLASYON: ' + value,
+                     citations=[dict(source_id=evidence[0]['id'], quote=evidence[0]['text'])])
+        assert answers.validate_answer(json.dumps(reply), evidence)['status'] == 'answered'
+        reply['citations'][0]['quote'] = value
+        with pytest.raises(answers.AnswerError):
+            answers.validate_answer(json.dumps(reply), evidence)
+
+
+@pytest.mark.parametrize('native_block', [False, True])
+def test_simulated_ui_stacked_values_need_explicit_confirmation(monkeypatch, native_block):
+    from streamlit.testing.v1 import AppTest
+    from tests.test_explicit_fields import native_pdf
+    monkeypatch.setenv('GEMINI_API_KEY', 'offline-simulation-key')
+    monkeypatch.setenv('HYBRIDDOC_GEMINI_MODELS', 'gemini-test')
+    calls = []
+    def fake(request):
+        calls.append(request)
+        sent = json.loads(json.loads(request.content)['contents'][0]['parts'][0]['text'])
+        source = sent['sources'][0]
+        assert source['association'] == 'not_inferred' and source['user_confirmation']
+        reply = dict(status='answered', answer='SİMÜLASYON: Deniz Örnek.',
+                     citations=[dict(source_id=source['id'], quote=source['text'])])
+        return httpx.Response(200, json={'candidates': [{'finishReason': 'STOP', 'content': {
+            'parts': [{'text': json.dumps(reply)}]}}]})
+    real_client = httpx.Client
+    monkeypatch.setattr(answers.httpx, 'Client', lambda **kw: real_client(**{**kw, 'transport': httpx.MockTransport(fake)}))
+    entries = ([(35, 100, 'Baba Adı\nDeniz Örnek.'), (35, 220, 'Baba Adı\nOrhan Örnek.')]
+               if native_block else [(35, 100, 'Baba Adı'), (35, 120, 'Deniz Örnek.'),
+                                     (35, 220, 'Baba Adı'), (35, 240, 'Orhan Örnek.')])
+    app = AppTest.from_file(str(APP)).run()
+    app.session_state['document'] = open_upload('invented.pdf', native_pdf(entries))
+    app.run()
+    app.text_input(key='question').set_value('Baba Adı Deniz')
+    app.button(key='search').click().run()
+    app.checkbox(key='generation_enabled').check().run()
+    app.selectbox(key='answer_provider').select('Gemini API').run()
+    app.checkbox(key='cloud_consent').check().run()
+    assert not app.exception and not calls
+    assert app.multiselect(key='answer_sources').value == []
+    value_hit = next(r for r in app.session_state['results'] if r['excerpt'] == 'Deniz Örnek.')
+    sid = answers.build_evidence([value_hit])[0][0]['id']
+    app.multiselect(key='answer_sources').set_value([sid]).run()
+    assert app.button(key='generate_answer').disabled
+    app.selectbox(key='relation_label_' + sid).select('Baba Adı').run()
+    app.selectbox(key='relation_value_' + sid).select('Deniz Örnek.').run()
+    app.button(key='confirm_relation_' + sid).click().run()
+    assert not app.exception and not calls and not app.button(key='generate_answer').disabled
+    preview = next(t.value for t in app.text if t.value.startswith('{\n  "question"'))
+    app.button(key='generate_answer').click().run()
+    assert not app.exception and len(calls) == 1
+    assert json.loads(calls[0].content)['contents'][0]['parts'][0]['text'] == preview
+    assert app.session_state['generated_answer']['status'] == 'answered'
+
+
 def test_confirmation_keeps_raw_provenance_and_requires_complete_citation():
     evidence = ambiguous_evidence()
     original = copy.deepcopy(evidence)

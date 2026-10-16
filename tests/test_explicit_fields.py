@@ -352,6 +352,10 @@ def test_wrapped_prose_retains_source_and_supported_citation(rotation, reverse, 
     assert len(results) == len(evidence) == 1
     assert results[0]['excerpt'] == ('city.' if single_word_end else 'a major city.')
     item = evidence[0]
+    assert answers.evidence_issue(evidence)
+    label = 'Ankara is the capital of Turkey and' + (' a major' if single_word_end else '')
+    item['user_confirmation'] = answers.confirm_source_relation(
+        evidence, item['id'], 'city', label, results[0]['excerpt'])
     assert answers.evidence_issue(evidence) is None
     assert item['association'] == 'not_inferred' and 'field_relation' not in item
     assert item['page'] == 1 and item['source_sha256'] == hashlib.sha256(data).hexdigest()

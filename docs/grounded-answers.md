@@ -129,10 +129,14 @@ Yanıt gövdesi en çok 64 KiB; üretim çıktısı en çok 1500 token istenir.
   matematik kaynağını seçmek üretimi durdurur. Böylece
   ilgisiz belirsiz bir hit açık bir alanın kullanımını tek başına engellemez.
   Gönderilecek JSON yalnızca seçili tam kesitleri içerir; önizleme ve istek
-  aynı kalır. Native paragraf satırları ve bitişik font span’leri tek metin
-  akışı olarak değerlendirilir; satır veya font değişikliği tek başına üretimi
-  engellemez. Ayrık sütunlar ve bağımsız tek sözcüklü parçalar düz cümle sayılmaz;
-  bir değerin sonundaki nokta veya çevresindeki geniş boşluk bunu değiştirmez.
+  aynı kalır. Aynı satırdaki bitişik font span’leri tek metin akışı olarak
+  değerlendirilir; font değişikliği tek başına üretimi engellemez. Ayrık
+  sütunlar ve aynı sütundaki tamamlanmamış parçalar onay gerektirir;
+  değerin sözcük sayısı, sonundaki nokta, geniş boşluk veya etiketle aynı
+  native blokta olması bunu değiştirmez. Satırlara bölünmüş paragraflar da
+  bu muhafazakâr kontrolde onay gerektirebilir; aşağıdaki akışı kullanın.
+  Her satırı tamamlanmış çok satırlı cümle blokları ayrı sayfa başlıkları
+  nedeniyle engellenmez.
   Kesitte iki noktalı belirsiz alan varsa üretim yine engellenir. İki noktasız,
   alt alta metinden alan ilişkisi çıkarılmaz. Bu muhafazakâr yapı kontrolü
   anlamsal çözümleme değildir.
