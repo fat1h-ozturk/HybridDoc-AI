@@ -7,7 +7,7 @@ import pytest
 
 from src import answers
 from src.workbench import open_upload
-from tests.form_fixtures import certificate_pdf, mixed_font_prose_pdf
+from tests.form_fixtures import certificate_pdf, mixed_font_prose_pdf, wrapped_prose_pdf
 
 QUESTION = 'denizin babasinin adi'
 
@@ -282,10 +282,15 @@ def test_split_square_root_field_blocks_before_simulated_http(rotation, provider
 @pytest.mark.parametrize('rotation', [0, 90, 180, 270])
 @pytest.mark.parametrize('value_first', [False, True])
 @pytest.mark.parametrize('value', ['Deniz', 'Orhan'])
-def test_stacked_no_colon_values_stay_ambiguous(rotation, value_first, value):
-    offset = -20 if value_first else 20
+@pytest.mark.parametrize('gap', [20, 40, 65])
+@pytest.mark.parametrize('reverse', [False, True])
+def test_stacked_no_colon_values_stay_ambiguous(rotation, value_first, value, gap, reverse):
+    offset = -gap if value_first else gap
+    second_label = 100 + 3 * gap
     entries = [(35,100,'Baba Adı'),(35,100 + offset,'Deniz.'),
-               (35,160,'Baba Adı'),(35,160 + offset,'Orhan.')]
+               (35,second_label,'Baba Adı'),(35,second_label + offset,'Orhan.')]
+    if reverse:
+        entries.reverse()
     data = native_pdf(entries, rotation=rotation)
     doc, results, evidence = evidence_for(data, f'Baba Adı {value}')
     assert any(r['excerpt'] == value + '.' for r in results)
@@ -333,6 +338,44 @@ def test_contiguous_mixed_font_prose_is_usable_from_either_span(rotation, revers
         assert sorted(b['bbox'] for b in doc.formula_pages[0]['blocks'] if b['kind'] == 'text') == sorted(
             list(s['bbox']) for s in spans)
     assert pymupdf.Pixmap(doc.source_crop(results[0])).width > 0
+
+
+@pytest.mark.parametrize('rotation', [0, 90, 180, 270])
+@pytest.mark.parametrize('reverse,native_paragraph,single_word_end', [
+    (False, False, False), (True, False, False), (False, True, False), (False, True, True)])
+def test_wrapped_prose_retains_source_and_supported_citation(rotation, reverse, native_paragraph, single_word_end, monkeypatch):
+    import hashlib
+
+    data = wrapped_prose_pdf(rotation=rotation, reverse=reverse, native_paragraph=native_paragraph,
+                             single_word_end=single_word_end)
+    doc, results, evidence = evidence_for(data, 'city')
+    assert len(results) == len(evidence) == 1
+    assert results[0]['excerpt'] == ('city.' if single_word_end else 'a major city.')
+    item = evidence[0]
+    assert answers.evidence_issue(evidence) is None
+    assert item['association'] == 'not_inferred' and 'field_relation' not in item
+    assert item['page'] == 1 and item['source_sha256'] == hashlib.sha256(data).hexdigest()
+    assert item['answer_eligible'] is False
+    assert 'Ankara is the capital of Turkey and' in item['text']
+    assert ('city.' if single_word_end else 'a major city.') in item['text']
+    with pymupdf.open(stream=data, filetype='pdf') as pdf:
+        pdf[0].set_rotation(0)
+        assert item['text'] == results[0]['source_context']['text'] == pdf[0].get_text(
+            'text', clip=pymupdf.Rect(results[0]['source_context']['bbox']), sort=True).strip()
+    assert pymupdf.Pixmap(doc.source_crop(results[0])).width > 0
+    monkeypatch.setenv('GEMINI_API_KEY', 'offline-simulation-key')
+    monkeypatch.setenv('HYBRIDDOC_GEMINI_MODELS', 'gemini-simulated')
+    calls = []
+    def fake(request):
+        calls.append(request)
+        assert json.loads(request.content)['contents'][0]['parts'][0]['text'] == answers.request_preview('city', evidence)
+        reply = {'status': 'answered', 'answer': 'SİMÜLASYON: Ankara büyük bir şehirdir.',
+                 'citations': [{'source_id': item['id'], 'quote': item['text']}]}
+        return httpx.Response(200, json={'candidates': [{'finishReason': 'STOP', 'content': {
+            'parts': [{'text': json.dumps(reply)}]}}]})
+    answer = answers.generate_answer('Gemini API', 'gemini-simulated', 'city', evidence,
+                                     consent=True, transport=httpx.MockTransport(fake))
+    assert len(calls) == 1 and answer['status'] == 'answered'
 
 
 @pytest.mark.parametrize('formula_y,blocked', [(80,True),(120,True),(300,False)])

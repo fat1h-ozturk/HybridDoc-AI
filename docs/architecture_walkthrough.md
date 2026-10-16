@@ -74,10 +74,11 @@ flowchart TD
   ```
 - **Kesit metadatası:** Kaynak bandıyla örtüşen mevcut formül kayıtları ve bu
   formülleri içeren gruplar, güven bayrakları değiştirilmeden sonuçta korunur.
-  Aynı satırdaki bitişik font span’leri `prose_run` içinde birlikte değerlendirilir;
-  ayrık sütunlar veya yakındaki hizalı, cümle olmayan üst/alt parçalar varsa
-  bu alan boş kalır. Böyle bir değer noktalama ile düz cümle sayılmaz;
-  alt alta metinden alan ilişkisi kurulmaz. Özgün span’ler ve tam kesit korunur.
+  Native paragraf satırları ve aynı satırdaki bitişik font span’leri `prose_run`
+  içinde birlikte değerlendirilir. Ayrık sütunlar ve tek sözcüklü bağımsız
+  parçalar uygun sayılmaz; dikey mesafenin artması bu kararı değiştirmez.
+  Paragraf devamındaki satır sonları tek başına engel değildir. Alt alta
+  metinden alan ilişkisi kurulmaz; özgün span’ler ve tam kesit korunur.
 - **`source_crop()`:** İlgili koordinat bandını PyMuPDF ile piksel görüntüsüne (`pixmap`) dönüştürür.
 - **İlişkilendirme:** `src/field_evidence.py` yalnızca native yatay tek satırdaki
   açık `Etiket: Değer` ilişkisini `association: "explicit_same_row"` olarak kaydeder.

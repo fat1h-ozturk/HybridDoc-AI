@@ -15,6 +15,22 @@ def mixed_font_prose_pdf(*, rotation=0, reverse=False):
         return pdf.tobytes()
 
 
+def wrapped_prose_pdf(*, rotation=0, reverse=False, native_paragraph=False, single_word_end=False):
+    with pymupdf.open() as pdf:
+        page = pdf.new_page(width=650, height=500)
+        if native_paragraph:
+            text = ('Ankara is the capital of Turkey and a major\ncity.' if single_word_end else
+                    'Ankara is the capital of Turkey and\na major city.')
+            page.insert_text((35, 100), text,
+                             fontname='helv', fontsize=11)
+        else:
+            entries = [(100, 'Ankara is the capital of Turkey and'), (120, 'a major city.')]
+            for y, text in reversed(entries) if reverse else entries:
+                page.insert_text((35, y), text, fontname='helv', fontsize=11)
+        page.set_rotation(rotation)
+        return pdf.tobytes()
+
+
 def certificate_pdf(*, order='columns', father='Orhan Örnek', columns=1,
                     stacked=False, second_page=False, inline=False, colon=False):
     with pymupdf.open() as doc:

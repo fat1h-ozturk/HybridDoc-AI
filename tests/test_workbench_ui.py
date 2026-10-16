@@ -472,8 +472,8 @@ def test_simulated_split_field_mixed_sources_explicit_action_and_reset(monkeypat
     assert len(calls) == 1
 
 
-@pytest.mark.parametrize('stacked', [False, True])
-def test_simulated_configured_no_colon_duplicate_values_cannot_be_selected_as_prose(monkeypatch, stacked):
+@pytest.mark.parametrize('gap', [0, 20, 40, 65])
+def test_simulated_configured_no_colon_duplicate_values_cannot_be_selected_as_prose(monkeypatch, gap):
     """OFFLINE SIMULATION: configured Gemini UI with invented PDF and fake HTTP."""
     import json
     import httpx
@@ -487,8 +487,8 @@ def test_simulated_configured_no_colon_duplicate_values_cannot_be_selected_as_pr
         pytest.fail('ambiguous no-colon form must not contact simulated provider')
     real_client = httpx.Client
     monkeypatch.setattr(answers.httpx, 'Client', lambda **kw: real_client(**{**kw, 'transport': httpx.MockTransport(forbidden)}))
-    entries = ([(35,100,'Baba Adı'),(35,120,'Deniz.'),
-                (35,160,'Baba Adı'),(35,180,'Orhan.')] if stacked else
+    entries = ([(35,100,'Baba Adı'),(35,100 + gap,'Deniz.'),
+                (35,100 + 3 * gap,'Baba Adı'),(35,100 + 4 * gap,'Orhan.')] if gap else
                [(35,100,'Baba Adı'),(185,100,'Deniz.'),
                 (35,130,'Baba Adı'),(185,130,'Orhan.')])
     data = native_pdf(entries)
@@ -515,13 +515,15 @@ def test_simulated_configured_no_colon_duplicate_values_cannot_be_selected_as_pr
     assert 'generated_answer' not in app.session_state
 
 
-def test_simulated_configured_mixed_font_prose_generates_only_on_click(monkeypatch):
-    """OFFLINE SIMULATION: contiguous prose with real retrieval and fake Gemini HTTP."""
+@pytest.mark.parametrize('prose', ['mixed_font', 'wrapped', 'standalone'])
+def test_simulated_configured_prose_generates_only_on_click(monkeypatch, prose):
+    """OFFLINE SIMULATION: native prose with real retrieval and fake Gemini HTTP."""
     import json
     import httpx
     from src import answers
     from src.workbench import open_upload
-    from tests.form_fixtures import mixed_font_prose_pdf
+    from tests.form_fixtures import mixed_font_prose_pdf, wrapped_prose_pdf
+    from tests.test_explicit_fields import native_pdf
 
     monkeypatch.setenv('GEMINI_API_KEY', 'offline-simulation-key')
     monkeypatch.setenv('HYBRIDDOC_GEMINI_MODELS', 'gemini-3.8-flash')
@@ -530,7 +532,8 @@ def test_simulated_configured_mixed_font_prose_generates_only_on_click(monkeypat
         calls.append(request)
         sent = json.loads(json.loads(request.content)['contents'][0]['parts'][0]['text'])
         source = sent['sources'][0]
-        assert 'Ankara is the capital of' in source['text'] and 'Turkey.' in source['text']
+        assert 'Ankara is the capital of' in source['text'] and 'Turkey' in source['text']
+        assert ('a major city.' if prose == 'wrapped' else 'Turkey.') in source['text']
         reply = {'status': 'answered', 'answer': 'SİMÜLASYON: Türkiye’nin başkenti Ankara’dır.',
                  'citations': [{'source_id': source['id'], 'quote': source['text']}]}
         return httpx.Response(200, json={'candidates': [{'finishReason': 'STOP', 'content': {
@@ -538,9 +541,11 @@ def test_simulated_configured_mixed_font_prose_generates_only_on_click(monkeypat
     real_client = httpx.Client
     monkeypatch.setattr(answers.httpx, 'Client', lambda **kw: real_client(**{**kw, 'transport': httpx.MockTransport(fake)}))
     app = AppTest.from_file(str(APP)).run()
-    app.session_state['document'] = open_upload('synthetic.pdf', mixed_font_prose_pdf())
+    data = {'mixed_font': mixed_font_prose_pdf, 'wrapped': wrapped_prose_pdf,
+            'standalone': lambda: native_pdf([(35, 100, 'Ankara is the capital of Turkey.')])}[prose]()
+    app.session_state['document'] = open_upload('synthetic.pdf', data)
     app.run()
-    app.text_input(key='question').set_value('Turkey')
+    app.text_input(key='question').set_value('city' if prose == 'wrapped' else 'Turkey')
     app.button(key='search').click().run()
     app.checkbox(key='generation_enabled').check().run()
     app.selectbox(key='answer_provider').select('Gemini API').run()

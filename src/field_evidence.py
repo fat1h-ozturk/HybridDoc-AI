@@ -21,7 +21,7 @@ def _native_rows(page) -> list:
 
 
 def prose_run_for_hit(page, hit) -> str:
-    """Return a contiguous horizontal run without detached row or stacked fragments."""
+    """Use native paragraphs and contiguous font runs, excluding isolated word fragments."""
     runs = []
     for row in _native_rows(page):
         run = None
@@ -47,12 +47,16 @@ def prose_run_for_hit(page, hit) -> str:
         peer = other['bbox']
         if peer.y0 < box.y1 and box.y0 < peer.y1:
             return ''
-        gap = max(peer.y0 - box.y1, box.y0 - peer.y1)
-        if (peer.x0 < box.x1 and box.x0 < peer.x1
-                and gap <= max(box.height, peer.height)
-                and not re.search(r'[.!?][”"\x27]?$', other['text'].strip())):
+    paragraphs = [block for block in page.get_text('dict')['blocks']
+                  if block['type'] == 0 and pymupdf.Rect(block['bbox']).contains(box)]
+    text = selected['text']
+    if len(paragraphs) == 1:
+        lines = paragraphs[0]['lines']
+        if any(tuple(line['dir']) != (1, 0) or line['wmode'] != 0 for line in lines):
             return ''
-    return selected['text']
+        text = ' '.join(''.join(span['text'] for span in line['spans']).strip()
+                        for line in sorted(lines, key=lambda line: (line['bbox'][1], line['bbox'][0])))
+    return text if len(text.split()) > 1 else ''
 
 
 def explicit_fields(pdf) -> dict:
