@@ -472,7 +472,8 @@ def test_simulated_split_field_mixed_sources_explicit_action_and_reset(monkeypat
     assert len(calls) == 1
 
 
-def test_simulated_configured_no_colon_duplicate_values_cannot_be_selected_as_prose(monkeypatch):
+@pytest.mark.parametrize('stacked', [False, True])
+def test_simulated_configured_no_colon_duplicate_values_cannot_be_selected_as_prose(monkeypatch, stacked):
     """OFFLINE SIMULATION: configured Gemini UI with invented PDF and fake HTTP."""
     import json
     import httpx
@@ -486,8 +487,11 @@ def test_simulated_configured_no_colon_duplicate_values_cannot_be_selected_as_pr
         pytest.fail('ambiguous no-colon form must not contact simulated provider')
     real_client = httpx.Client
     monkeypatch.setattr(answers.httpx, 'Client', lambda **kw: real_client(**{**kw, 'transport': httpx.MockTransport(forbidden)}))
-    data = native_pdf([(35,100,'Baba Adı'),(185,100,'Deniz.'),
-                       (35,130,'Baba Adı'),(185,130,'Orhan.')])
+    entries = ([(35,100,'Baba Adı'),(35,120,'Deniz.'),
+                (35,160,'Baba Adı'),(35,180,'Orhan.')] if stacked else
+               [(35,100,'Baba Adı'),(185,100,'Deniz.'),
+                (35,130,'Baba Adı'),(185,130,'Orhan.')])
+    data = native_pdf(entries)
     app = AppTest.from_file(str(APP)).run()
     app.session_state['document'] = open_upload('synthetic.pdf', data)
     app.run()
@@ -509,3 +513,45 @@ def test_simulated_configured_no_colon_duplicate_values_cannot_be_selected_as_pr
         preview = next(t.value for t in app.text if t.value.startswith('{\n  "question"'))
         assert json.loads(preview)['sources'] == [item]
     assert 'generated_answer' not in app.session_state
+
+
+def test_simulated_configured_mixed_font_prose_generates_only_on_click(monkeypatch):
+    """OFFLINE SIMULATION: contiguous prose with real retrieval and fake Gemini HTTP."""
+    import json
+    import httpx
+    from src import answers
+    from src.workbench import open_upload
+    from tests.form_fixtures import mixed_font_prose_pdf
+
+    monkeypatch.setenv('GEMINI_API_KEY', 'offline-simulation-key')
+    monkeypatch.setenv('HYBRIDDOC_GEMINI_MODELS', 'gemini-3.8-flash')
+    calls = []
+    def fake(request):
+        calls.append(request)
+        sent = json.loads(json.loads(request.content)['contents'][0]['parts'][0]['text'])
+        source = sent['sources'][0]
+        assert 'Ankara is the capital of' in source['text'] and 'Turkey.' in source['text']
+        reply = {'status': 'answered', 'answer': 'SİMÜLASYON: Türkiye’nin başkenti Ankara’dır.',
+                 'citations': [{'source_id': source['id'], 'quote': source['text']}]}
+        return httpx.Response(200, json={'candidates': [{'finishReason': 'STOP', 'content': {
+            'parts': [{'text': json.dumps(reply)}]}}]})
+    real_client = httpx.Client
+    monkeypatch.setattr(answers.httpx, 'Client', lambda **kw: real_client(**{**kw, 'transport': httpx.MockTransport(fake)}))
+    app = AppTest.from_file(str(APP)).run()
+    app.session_state['document'] = open_upload('synthetic.pdf', mixed_font_prose_pdf())
+    app.run()
+    app.text_input(key='question').set_value('Turkey')
+    app.button(key='search').click().run()
+    app.checkbox(key='generation_enabled').check().run()
+    app.selectbox(key='answer_provider').select('Gemini API').run()
+    assert not calls and app.button(key='generate_answer').disabled
+    app.checkbox(key='cloud_consent').check().run()
+    assert not app.exception and not calls
+    assert len(app.multiselect(key='answer_sources').value) == 1
+    assert not app.button(key='generate_answer').disabled
+    preview = next(t.value for t in app.text if t.value.startswith('{\n  "question"'))
+    app.button(key='generate_answer').click().run()
+    assert not app.exception and len(calls) == 1
+    assert json.loads(calls[0].content)['contents'][0]['parts'][0]['text'] == preview
+    assert app.session_state['generated_answer']['status'] == 'answered'
+    assert app.session_state['generated_answer']['citations'][0]['quote'] == json.loads(preview)['sources'][0]['text']

@@ -2,6 +2,19 @@
 import pymupdf
 
 
+def mixed_font_prose_pdf(*, rotation=0, reverse=False):
+    with pymupdf.open() as pdf:
+        page = pdf.new_page(width=650, height=500)
+        prefix = 'Ankara is the capital of '
+        entries = [(35, prefix, 'helv'),
+                   (35 + pymupdf.get_text_length(prefix, fontname='helv', fontsize=11),
+                    'Turkey.', 'hebo')]
+        for x, text, font in reversed(entries) if reverse else entries:
+            page.insert_text((x, 100), text, fontname=font, fontsize=11)
+        page.set_rotation(rotation)
+        return pdf.tobytes()
+
+
 def certificate_pdf(*, order='columns', father='Orhan Örnek', columns=1,
                     stacked=False, second_page=False, inline=False, colon=False):
     with pymupdf.open() as doc:

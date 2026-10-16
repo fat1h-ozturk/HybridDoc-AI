@@ -128,10 +128,12 @@ Yanıt gövdesi en çok 64 KiB; üretim çıktısı en çok 1500 token istenir.
   Belirsiz veya matematik kaynağını tekrar seçmek üretimi durdurur. Böylece
   ilgisiz belirsiz bir hit açık bir alanın kullanımını tek başına engellemez.
   Gönderilecek JSON yalnızca seçili tam kesitleri içerir; önizleme ve istek
-  aynı kalır. Noktalama ile biten düz cümleler önceki muhafazakâr yoldadır;
-  kesitinde iki noktalı belirsiz alan bulunan veya native satırında ayrı span’ler
-  bulunan değerler noktalama ile uygun hâle gelmez; iki noktasız form değerleri de
-  bu kapsamda incelemeye bırakılır.
+  aynı kalır. Noktalama ile biten düz cümlelerde bitişik font span’leri tek metin
+  akışı olarak değerlendirilir; font değişikliği tek başına üretimi engellemez.
+  Ayrık sütunlar, yakındaki hizalı cümle olmayan üst/alt parçalar veya kesitteki
+  iki noktalı belirsiz alanlar varsa değerler noktalama ile uygun hâle gelmez.
+  İki noktasız, alt alta form değerleri de incelemeye bırakılır; bundan bir alan
+  ilişkisi çıkarılmaz. Bu muhafazakâr geometri kontrolü anlamsal çözümleme değildir.
 - Formül adayları/grupları veya seçili kesitte matematik gösterimi varsa üretim
   yapılmaz. Metin eşleşmesi tam kaynak bandına genişletilirken bantla örtüşen
   mevcut formüller ve onları içeren gruplar güven bayraklarıyla birlikte korunur;

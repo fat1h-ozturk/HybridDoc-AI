@@ -44,8 +44,8 @@ def build_evidence(results: list) -> tuple[list, int]:
         text = context.get('text') if context.get('text') else result.get('excerpt', '')
         identity = [result.get('source_sha256'), result.get('page_number'), result.get('chunk_id')]
         # Inspect original hit shape locally, without transmitting text outside its crop.
-        lines = [line.strip() for line in result.get('excerpt', '').splitlines() if line.strip()]
-        explicit = (bool(lines) and ':' not in text and not context.get('has_row_peers', False)
+        lines = [line.strip() for line in context.get('prose_run', result.get('excerpt', '')).splitlines() if line.strip()]
+        explicit = (bool(lines) and ':' not in text
                     and all(re.search(r'[.!?][”"\x27]?$', line) for line in lines))
         item = {
             'id': 'S-' + hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:20],

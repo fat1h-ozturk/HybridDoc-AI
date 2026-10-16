@@ -1,4 +1,4 @@
-"""Narrow native same-row colon relations, never semantic/identity verification."""
+"""Native source geometry for prose runs and narrow same-row colon relations."""
 from collections import Counter
 import re
 
@@ -8,19 +8,60 @@ from src.retrieval.search_pdf import normalize_text
 from src.ingestion.formula_regions import native_table_cells
 
 
+def _native_rows(page) -> list:
+    spans = [dict(span, direction=line['dir'], wmode=line['wmode'])
+             for block in page.get_text('dict')['blocks'] if block['type'] == 0
+             for line in block['lines'] for span in line['spans'] if span['text'].strip()]
+    rows = []
+    for span in sorted(spans, key=lambda s: (s['origin'][1], s['bbox'][0])):
+        if not rows or abs(span['origin'][1] - rows[-1][0]['origin'][1]) > 1:
+            rows.append([])
+        rows[-1].append(span)
+    return rows
+
+
+def prose_run_for_hit(page, hit) -> str:
+    """Return a contiguous horizontal run without detached row or stacked fragments."""
+    runs = []
+    for row in _native_rows(page):
+        run = None
+        for span in sorted(row, key=lambda s: s['bbox'][0]):
+            box = pymupdf.Rect(span['bbox'])
+            horizontal = tuple(span['direction']) == (1, 0) and span['wmode'] == 0
+            if (run and horizontal and run['horizontal']
+                    and -.5 <= box.x0 - run['bbox'].x1 <= max(run['size'], span['size']) / 2):
+                run['bbox'] |= box
+                run['text'] += span['text']
+                run['size'] = max(run['size'], span['size'])
+            else:
+                run = dict(bbox=box, text=span['text'], size=span['size'], horizontal=horizontal)
+                runs.append(run)
+    matches = [run for run in runs if run['bbox'].intersects(hit)]
+    if len(matches) != 1 or not matches[0]['horizontal']:
+        return ''
+    selected = matches[0]
+    box = selected['bbox']
+    for other in runs:
+        if other is selected:
+            continue
+        peer = other['bbox']
+        if peer.y0 < box.y1 and box.y0 < peer.y1:
+            return ''
+        gap = max(peer.y0 - box.y1, box.y0 - peer.y1)
+        if (peer.x0 < box.x1 and box.x0 < peer.x1
+                and gap <= max(box.height, peer.height)
+                and not re.search(r'[.!?][”"\x27]?$', other['text'].strip())):
+            return ''
+    return selected['text']
+
+
 def explicit_fields(pdf) -> dict:
     """Keep original native spans; reject multi-column, duplicate and wrapped fields."""
     candidates, counts = [], Counter()
     for page in pdf:
-        spans = [dict(span, direction=line['dir'], wmode=line['wmode'])
-                 for block in page.get_text('dict')['blocks'] if block['type'] == 0
-                 for line in block['lines'] for span in line['spans'] if span['text'].strip()]
+        rows = _native_rows(page)
+        spans = [span for row in rows for span in row]
         cells, table_error = native_table_cells(page)
-        rows = []
-        for span in sorted(spans, key=lambda s: (s['origin'][1], s['bbox'][0])):
-            if not rows or abs(span['origin'][1] - rows[-1][0]['origin'][1]) > 1:
-                rows.append([])
-            rows[-1].append(span)
         for row in rows:
             row.sort(key=lambda s: s['bbox'][0])
             text = ' '.join(s['text'].strip() for s in row)

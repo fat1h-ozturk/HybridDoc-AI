@@ -7,7 +7,7 @@ import pytest
 
 from src import answers
 from src.workbench import open_upload
-from tests.form_fixtures import certificate_pdf
+from tests.form_fixtures import certificate_pdf, mixed_font_prose_pdf
 
 QUESTION = 'denizin babasinin adi'
 
@@ -277,6 +277,62 @@ def test_split_square_root_field_blocks_before_simulated_http(rotation, provider
     with pytest.raises(answers.AnswerError, match='matematik'):
         answers.generate_answer(provider, 'simulated', 'Result', [item], consent=True,
                                 transport=httpx.MockTransport(forbidden))
+
+
+@pytest.mark.parametrize('rotation', [0, 90, 180, 270])
+@pytest.mark.parametrize('value_first', [False, True])
+@pytest.mark.parametrize('value', ['Deniz', 'Orhan'])
+def test_stacked_no_colon_values_stay_ambiguous(rotation, value_first, value):
+    offset = -20 if value_first else 20
+    entries = [(35,100,'Baba Adı'),(35,100 + offset,'Deniz.'),
+               (35,160,'Baba Adı'),(35,160 + offset,'Orhan.')]
+    data = native_pdf(entries, rotation=rotation)
+    doc, results, evidence = evidence_for(data, f'Baba Adı {value}')
+    assert any(r['excerpt'] == value + '.' for r in results)
+    assert evidence and all(e['requires_source_review'] for e in evidence)
+    assert all(e['association'] == 'not_inferred' and 'field_relation' not in e for e in evidence)
+    with pymupdf.open(stream=data, filetype='pdf') as pdf:
+        pdf[0].set_rotation(0)
+        for result, item in zip(results, evidence):
+            context = result['source_context']
+            assert item['text'] == context['text'] == pdf[0].get_text(
+                'text', clip=pymupdf.Rect(context['bbox']), sort=True).strip()
+            assert pymupdf.Pixmap(doc.source_crop(result)).width > 0
+    def forbidden(request):
+        pytest.fail('stacked form must not reach simulated HTTP')
+    for item in evidence:
+        for provider in ('Ollama', 'Gemini API'):
+            with pytest.raises(answers.AnswerError, match='association=not_inferred'):
+                answers.generate_answer(provider, 'simulated', f'Baba Adı {value}', [item],
+                                        consent=True, transport=httpx.MockTransport(forbidden))
+
+
+@pytest.mark.parametrize('rotation', [0, 90, 180, 270])
+@pytest.mark.parametrize('reverse', [False, True])
+@pytest.mark.parametrize('query', ['Turkey', 'Ankara'])
+def test_contiguous_mixed_font_prose_is_usable_from_either_span(rotation, reverse, query):
+    import hashlib
+
+    data = mixed_font_prose_pdf(rotation=rotation, reverse=reverse)
+    doc, results, evidence = evidence_for(data, query)
+    assert len(results) == len(evidence) == 1
+    assert results[0]['excerpt'] in ('Turkey.', 'Ankara is the capital of ')
+    item = evidence[0]
+    assert answers.evidence_issue(evidence) is None
+    assert item['association'] == 'not_inferred' and 'field_relation' not in item
+    assert item['page'] == 1 and item['source_sha256'] == hashlib.sha256(data).hexdigest()
+    assert item['answer_eligible'] is False
+    assert 'Ankara is the capital of' in item['text'] and 'Turkey.' in item['text']
+    with pymupdf.open(stream=data, filetype='pdf') as pdf:
+        pdf[0].set_rotation(0)
+        assert item['text'] == pdf[0].get_text(
+            'text', clip=pymupdf.Rect(results[0]['source_context']['bbox']), sort=True).strip()
+        spans = [s for b in pdf[0].get_text('dict')['blocks'] if b['type'] == 0
+                 for line in b['lines'] for s in line['spans']]
+        assert len(spans) == 2 and len({s['font'] for s in spans}) == 2
+        assert sorted(b['bbox'] for b in doc.formula_pages[0]['blocks'] if b['kind'] == 'text') == sorted(
+            list(s['bbox']) for s in spans)
+    assert pymupdf.Pixmap(doc.source_crop(results[0])).width > 0
 
 
 @pytest.mark.parametrize('formula_y,blocked', [(80,True),(120,True),(300,False)])

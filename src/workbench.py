@@ -10,7 +10,7 @@ from src.chunking.text_chunker import chunk_pages, chunk_formula_pages, format_c
 from src.evaluation.review_formulas import generate_formula_review_html
 from src.ingestion.pdf_loader import load_pdf, load_pdf_formulas
 from src.retrieval.search_pdf import BM25Searcher, tokenize
-from src.field_evidence import explicit_fields, relation_for_hit
+from src.field_evidence import explicit_fields, relation_for_hit, prose_run_for_hit
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 MAX_PAGES = 200
@@ -48,12 +48,7 @@ class WorkbenchDocument:
                     'text': page.get_text('text', clip=band, sort=True).strip(),
                     'bbox': list(band),
                     'association': 'not_inferred',
-                    'has_row_peers': any(
-                        span['text'].strip()
-                        and hit.y0 < (span['bbox'][1] + span['bbox'][3]) / 2 < hit.y1
-                        and not hit.contains(pymupdf.Rect(span['bbox']))
-                        for native_block in page.get_text('dict')['blocks'] if native_block['type'] == 0
-                        for line in native_block['lines'] for span in line['spans']),
+                    'prose_run': prose_run_for_hit(page, hit),
                     'note': ('Bu kesit çevredeki satır ve sütunları gösterir; etiket–değer '
                              'ilişkisi otomatik seçilmez. Değer boş veya ilişki belirsizse '
                              'bu kaynaktan kesin cevap çıkarılamaz. Kırpımı inceleyin.'),
