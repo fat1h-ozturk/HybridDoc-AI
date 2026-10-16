@@ -4,13 +4,15 @@ import os
 import streamlit as st
 
 from src.answers import (AnswerError, SYSTEM_PROMPT, build_evidence, evidence_issue,
-                         gemini_models, generate_answer, ollama_models, request_preview)
+                         confirm_source_relation, evidence_fingerprint, math_evidence_issue,
+                         gemini_models, generate_answer, ollama_models, relation_choices, request_preview)
 
 
-def render_answer_panel(results: list, question: str):
+def render_answer_panel(results: list, question: str, document=None):
     st.subheader('Kaynaklara dayalı cevap — isteğe bağlı')
     if not st.checkbox('Cevap üretimini etkinleştir', key='generation_enabled'):
         st.session_state.pop('generated_answer', None)
+        st.session_state.pop('source_confirmations', None)
         return
     provider = st.selectbox('Sağlayıcı', ['Ollama', 'Gemini API'], key='answer_provider')
     evidence, omitted = build_evidence(results)
@@ -23,13 +25,51 @@ def render_answer_panel(results: list, question: str):
         reason = evidence_issue([item])
         if reason:
             st.warning(f"Varsayılan seçim dışında: {sid} — Sayfa {item['page']}: {reason} "
-                       'Kaynak yukarıda görünür; seçerseniz üretim durur.')
+                       'Kaynak yukarıda görünür; seçili belirsiz metin için ayrıca ilişki onayı gerekir.')
         else:
             usable.append(sid)
     selected = st.multiselect('Gönderilecek kaynaklar', list(by_id), default=usable,
                              format_func=lambda sid: f"{sid} — Sayfa {by_id[sid]['page']} — {by_id[sid].get('field_relation', {}).get('label', 'Kaynak')}",
                              key='answer_sources')
     evidence = [by_id[sid] for sid in selected if sid in by_id]
+    confirmation_scope = (question, evidence_fingerprint(evidence))
+    if confirmation_scope != st.session_state.get('confirmation_scope'):
+        st.session_state['source_confirmations'] = {}
+        st.session_state['confirmation_scope'] = confirmation_scope
+        for key in list(st.session_state):
+            if key.startswith(('relation_label_', 'relation_value_')):
+                st.session_state.pop(key, None)
+    records = st.session_state.setdefault('source_confirmations', {})
+    for item in evidence:
+        if not evidence_issue([item]) or math_evidence_issue(item):
+            continue
+        sid = item['id']
+        st.text(f"İlişki onayı — {sid} — Sayfa {item['page']}\n{item['text']}")
+        crop_visible = False
+        if document is not None and item.get('source_bbox'):
+            try:
+                st.image(document.source_crop({'page_number': item['page'],
+                                               'source_context': {'bbox': item['source_bbox']}}),
+                         caption='Onaylanacak kaynağın özgün kırpımı')
+                crop_visible = True
+            except Exception:
+                st.warning('Kaynak kırpımı gösterilemedi; ilişki onayı kullanılamaz.')
+        lines = relation_choices(item)
+        label = st.selectbox('Kaynakta görünen etiket', lines, index=None,
+                             key='relation_label_' + sid)
+        value = st.selectbox('Bu etikete ait kaynakta görünen değer', lines, index=None,
+                             key='relation_value_' + sid)
+        record = records.get(sid)
+        if record and (record['label'], record['value']) != (label, value):
+            records.pop(sid)
+        st.caption(f"Seçilen ilişki: {label or 'Etiket seçilmedi'} → {value or 'Değer seçilmedi'}. "
+                   'Yalnızca bu kaynak ve bu soru için kullanıcı beyanıdır; uygulama doğrulaması değildir.')
+        if st.button('Gösterilen etiket–değer ilişkisini onaylıyorum', key='confirm_relation_' + sid,
+                     disabled=not crop_visible or not label or not value or label == value):
+            records[sid] = confirm_source_relation(evidence, sid, question, label, value)
+        if sid in records:
+            item['user_confirmation'] = records[sid]
+            st.caption('Bu ilişkiyi kullanıcı onayladı; uygulama doğrulamadı. association=not_inferred korunur.')
     st.caption('Önizleme: yalnızca aşağıdaki soru ve seçili kaynak JSON’u gönderilir. '
                'PDF dosyası, görseller, API anahtarı ve diğer sayfalar bu içeriğe eklenmez. '
                'En çok 5 kaynak, kaynak başına 4000 karakter; toplam kanıt 16000 karakter.')
@@ -88,7 +128,7 @@ def render_answer_panel(results: list, question: str):
         st.session_state.pop('generated_answer', None)
         st.session_state.pop('answer_error', None)
         st.session_state['answer_scope'] = scope
-    issue = evidence_issue(evidence)
+    issue = evidence_issue(evidence, question=question)
     if issue:
         st.warning(issue)
     if st.button('Cevap üret', key='generate_answer',
@@ -105,6 +145,8 @@ def render_answer_panel(results: list, question: str):
     if 'generated_answer' in st.session_state:
         answer = st.session_state['generated_answer']
         st.caption('Model cevabı: ' + ('kaynak yetersiz / çekimser' if answer['status'] == 'abstained' else 'alıntı denetiminden geçti'))
+        if any(item.get('user_confirmation') for item in evidence):
+            st.caption('Kaynak ilişkisini kullanıcı onayladı; uygulama doğrulaması veya anlamsal doğruluk garantisi değildir.')
         st.text(answer['answer'])
         for citation in answer['citations']:
             source = by_id[citation['source_id']]

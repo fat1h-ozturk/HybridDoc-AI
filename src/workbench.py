@@ -47,6 +47,9 @@ class WorkbenchDocument:
                 result['source_context'] = {
                     'text': page.get_text('text', clip=band, sort=True).strip(),
                     'bbox': list(band),
+                    'spans': [{'text': span['text'], 'bbox': list(span['bbox'])}
+                              for block in page.get_text('dict', clip=band, sort=True)['blocks']
+                              for line in block.get('lines', []) for span in line['spans']],
                     'association': 'not_inferred',
                     'prose_run': prose_run_for_hit(page, hit),
                     'note': ('Bu kesit çevredeki satır ve sütunları gösterir; etiket–değer '

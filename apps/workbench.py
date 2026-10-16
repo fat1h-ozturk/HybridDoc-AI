@@ -42,7 +42,8 @@ else:
 identity = (name, hashlib.sha256(data).hexdigest()) if data is not None else None
 if identity != st.session_state.get("identity"):
     for key in ("document", "results", "result_question", "result_text", "report_html", "load_error", "question",
-                "generated_answer", "answer_error", "answer_scope", "cloud_consent", "answer_sources"):
+                "generated_answer", "answer_error", "answer_scope", "cloud_consent", "answer_sources",
+                "source_confirmations", "confirmation_scope"):
         st.session_state.pop(key, None)
     st.session_state["identity"] = identity
     if data is not None:
@@ -68,11 +69,14 @@ if empty_pages:
                "Metin katmanı olan bir PDF seçin veya mevcut açıkça isteğe bağlı yerel OCR yolunu inceleyin. "
                "Bu uygulama OCR çalıştırmaz.")
 
-with st.form("question_form"):
-    question = st.text_input("Soru / belge sözcükleri", key="question")
-    submitted = st.form_submit_button("Kaynakları ara", key="search")
+question = st.text_input("Soru / belge sözcükleri", key="question")
+submitted = st.button("Kaynakları ara", key="search")
+if question != st.session_state.get("result_question"):
+    for key in ("generated_answer", "answer_error", "answer_scope", "source_confirmations", "confirmation_scope"):
+        st.session_state.pop(key, None)
 if submitted:
-    for key in ("generated_answer", "answer_error", "answer_scope", "answer_sources"):
+    for key in ("generated_answer", "answer_error", "answer_scope", "answer_sources",
+                "source_confirmations", "confirmation_scope"):
         st.session_state.pop(key, None)
     st.session_state.pop("results", None)
     st.session_state.pop("result_text", None)
@@ -164,7 +168,10 @@ if "results" in st.session_state:
                        file_name="sources.txt", mime="text/plain; charset=utf-8")
 
 if "results" in st.session_state:
-    render_answer_panel(st.session_state["results"], st.session_state["result_question"])
+    if question == st.session_state["result_question"]:
+        render_answer_panel(st.session_state["results"], question, document)
+    else:
+        st.info('Soru değişti; eski cevap ve ilişki onayları kaldırıldı. Yeni soru için Kaynakları ara düğmesine basın.')
 
 native_tab, chunk_tab, formula_tab = st.tabs(["Tam sayfa metni", "Sözcük sınırı parçaları", "Formül inceleme"])
 with native_tab:

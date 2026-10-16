@@ -20,6 +20,10 @@ Father/Mother/Student associations. association=not_inferred means extraction or
 nearby names, rows or columns do not establish a relationship. explicit_same_row records only a native horizontal Label: Value extraction relation,
 not verified semantic truth or personal identity. For these fields cite the complete
 field_relation.quote containing BOTH label and value. Only an explicit
+user_confirmation can attest an otherwise ambiguous ordinary label/value relation:
+it is the user's attestation, not application verification or semantic truth.
+For a user-confirmed source cite its COMPLETE text, including label and value.
+Without such confirmation, do not infer a relation from not_inferred sources. An explicit
 statement in the evidence may support a factual answer. If the requested fact is
 missing or ambiguous, abstain and direct the user to inspect the source.
 All formula trust flags remain in force: answer_eligible=false is never upgraded.
@@ -51,6 +55,8 @@ def build_evidence(results: list) -> tuple[list, int]:
             'id': 'S-' + hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:20],
             'page': result['page_number'], 'text': text,
             'source_sha256': result.get('source_sha256'),
+            'source_bbox': context.get('bbox'),
+            'source_spans': context.get('spans', []),
             'requires_source_review': not explicit,
             'association': context.get('association', 'not_inferred'),
             'answer_eligible': result.get('answer_eligible', False),
@@ -79,19 +85,68 @@ def request_preview(question: str, evidence: list) -> str:
     return json.dumps({'question': question, 'sources': evidence}, ensure_ascii=False, indent=2)
 
 
-def evidence_issue(evidence: list) -> str | None:
+def evidence_fingerprint(evidence: list) -> str:
+    """Bind attestation to the entire selected raw evidence, including provenance."""
+    raw = [{k: v for k, v in item.items() if k != 'user_confirmation'} for item in evidence]
+    return hashlib.sha256(json.dumps(raw, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
+
+def math_evidence_issue(item: dict) -> str | None:
+    if (item.get('formulas') or item.get('formula_groups')
+            or re.search(r'[=+×÷^]|\b\d+\s*[-/]\s*\d+', item['text'])):
+        return ('Doğrulanmamış matematik/formül kaynağı seçili; cevap üretimi yapılmaz. '
+                'answer_eligible=false korunur. Kaynak görüntüsünü inceleyin.')
+    return None
+
+
+def relation_choices(item: dict) -> list[str]:
+    """Existing native span texts (or whole source lines), never guessed pairs."""
+    texts = ([span['text'] for span in item.get('source_spans', [])]
+             or item['text'].splitlines())
+    return list(dict.fromkeys(text.strip() for text in texts
+                             if text.strip() and text.strip() in item['text']))
+
+
+def confirm_source_relation(evidence: list, source_id: str, question: str, label: str, value: str) -> dict:
+    """Record a user's exact existing-line choices; never rewrite extraction data."""
+    item = next((s for s in evidence if s['id'] == source_id), None)
+    if item is None or math_evidence_issue(item):
+        raise AnswerError('Bu kaynak için alan onayı kullanılamaz; matematik koruması değişmez.')
+    lines = relation_choices(item)
+    if (not question.strip() or not item.get('source_sha256')
+            or label not in lines or value not in lines or label == value):
+        raise AnswerError('Aynı kaynak kesitinden ayrı, dolu etiket ve değer metinlerini seçin.')
+    return {'document_sha256': item['source_sha256'],
+            'question_sha256': hashlib.sha256(question.encode()).hexdigest(),
+            'evidence_fingerprint': evidence_fingerprint(evidence),
+            'source_id': source_id, 'label': label, 'value': value}
+
+
+def _confirmation_matches(item: dict, evidence: list, question: str | None) -> bool:
+    record = item.get('user_confirmation')
+    if not isinstance(record, dict):
+        return False
+    try:
+        expected = confirm_source_relation(evidence, item['id'], question or '_', record['label'], record['value'])
+        if question is None:
+            expected['question_sha256'] = record['question_sha256']
+        return record == expected
+    except (AnswerError, KeyError, TypeError):
+        return False
+
+
+def evidence_issue(evidence: list, *, question: str | None = None) -> str | None:
     if not evidence:
         return 'Gönderilebilir kaynak kanıtı yok; sağlayıcı çağrılmadı. Kaynakları inceleyin.'
     for item in evidence:
-        if (item.get('formulas') or item.get('formula_groups')
-                or re.search(r'[=+×÷^]|\b\d+\s*[-/]\s*\d+', item['text'])):
-            return ('Doğrulanmamış matematik/formül kaynağı seçili; cevap üretimi yapılmaz. '
-                    'answer_eligible=false korunur. Kaynak görüntüsünü inceleyin.')
+        if issue := math_evidence_issue(item):
+            return issue
         # Geometry-backed plain fields do not change formula trust or semantic truth.
         if item.get('association') == 'not_inferred' and (
-                item.get('requires_source_review', True) or ':' in item['text']):
+                item.get('requires_source_review', True) or ':' in item['text']) and not _confirmation_matches(item, evidence, question):
             return ('Alan ilişkisi belirsiz (association=not_inferred); etiket ve yakın değerden '
-                    'eşleştirme çıkarılmaz. Cevap yerine kaynak kesitini inceleyin.')
+                    'eşleştirme çıkarılmaz. İlgili kaynağı seçip metin ve kırpımı inceleyin; '
+                    'gösterilen etiket–değer ilişkisini açıkça onaylayabilir veya farklı sözcüklerle arayabilirsiniz.')
     return None
 
 
@@ -160,6 +215,7 @@ def validate_answer(raw: str, evidence: list) -> dict:
             raise ValueError
         sources = {item['id']: item['text'] for item in evidence}
         fields = {item['id']: item['field_relation'] for item in evidence if item.get('field_relation')}
+        confirmed = {item['id'] for item in evidence if item.get('user_confirmation')}
         for citation in citations:
             if not isinstance(citation, dict) or set(citation) != {'source_id', 'quote'}:
                 raise ValueError
@@ -169,6 +225,8 @@ def validate_answer(raw: str, evidence: list) -> dict:
                 raise ValueError
             if data['status'] == 'answered' and source_id in fields and fields[source_id]['quote'] not in quote:
                 raise ValueError
+            if data['status'] == 'answered' and source_id in confirmed and quote != sources[source_id]:
+                raise ValueError
         return data
     except (ValueError, TypeError, KeyError, RecursionError):
         raise AnswerError('Model çıktısı veya kaynak/alıntı denetimi geçersiz; cevap gösterilmedi. Kaynağı inceleyin.') from None
@@ -176,7 +234,7 @@ def validate_answer(raw: str, evidence: list) -> dict:
 
 def generate_answer(provider: str, model: str, question: str, evidence: list, *, consent=False, transport=None) -> dict:
     """Called only by the explicit action. No fallback, retries, tools or file uploads."""
-    issue = evidence_issue(evidence)
+    issue = evidence_issue(evidence, question=question)
     if issue:
         raise AnswerError(issue)
     if not question.strip() or len(question) > MAX_QUESTION_CHARS:

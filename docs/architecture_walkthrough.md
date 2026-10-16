@@ -113,6 +113,15 @@ Ham PDF Akışı (PDF motorunun çizim sırası):
   kaydedilebilir; belirsiz düzenler `not_inferred` kalır. Cevap paneli uygun
   kaynakları varsayılan seçer, dışlanan her kaynağı gerekçesiyle görünür tutar.
   Alan alıntısı etiketi ve değeri birlikte kapsamak zorundadır.
+- **Kullanıcı ilişki onayı:** Cevap panelinde kullanıcı seçili belirsiz sıradan
+  kaynağın tam metnini ve özgün kırpımını inceler, native span metinlerinden
+  etiket/değeri ayrı seçip açık onay verir. `source_context.spans` metin ve
+  kutuları korur; `user_confirmation` belge SHA’sı, soru özeti ve seçili ham
+  kanıt parmak izine bağlı ayrı bir beyandır. `not_inferred` ve formül güveni
+  değişmez. Seçim/soru/belge veya etiket/değer değişikliği onayı ve cevabı
+  geçersizleştirir. Onay çağrı yapmaz; üretim düğmesi ve bulut onayı ayrıdır.
+  Onaylı kaynak için alıntı tam kesiti kapsar; uygulama ilişkiyi doğruladığını
+  iddia etmez. Matematik/formül kaynakları bu yolla kullanılamaz.
 
 ### Sıralama Skoru (Ranking) vs. Cevap Doğruluğu (Correctness)
 - BM25 skoru (ör. `4.0310`), sorudaki terimlerin belgedeki sıklığını ve uzunluğunu ölçen leksikal bir sıralama metriğidir.

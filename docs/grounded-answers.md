@@ -125,7 +125,8 @@ Yanıt gövdesi en çok 64 KiB; üretim çıktısı en çok 1500 token istenir.
   Genel tablo/semantik form çözümleyici yoktur.
 - Üretime uygun kaynaklar varsayılan seçilir. Her uygun olmayan BM25 eşleşmesi
   kimliği, sayfası ve engel gerekçesiyle görünür; kaynak kartı/kırpımı silinmez.
-  Belirsiz veya matematik kaynağını tekrar seçmek üretimi durdurur. Böylece
+  Belirsiz kaynağı tekrar seçmek ayrıca kullanıcı ilişki onayı gerektirir;
+  matematik kaynağını seçmek üretimi durdurur. Böylece
   ilgisiz belirsiz bir hit açık bir alanın kullanımını tek başına engellemez.
   Gönderilecek JSON yalnızca seçili tam kesitleri içerir; önizleme ve istek
   aynı kalır. Native paragraf satırları ve bitişik font span’leri tek metin
@@ -135,6 +136,22 @@ Yanıt gövdesi en çok 64 KiB; üretim çıktısı en çok 1500 token istenir.
   Kesitte iki noktalı belirsiz alan varsa üretim yine engellenir. İki noktasız,
   alt alta metinden alan ilişkisi çıkarılmaz. Bu muhafazakâr yapı kontrolü
   anlamsal çözümleme değildir.
+- Belirsiz sıradan metni kullanmak için **Gönderilecek kaynaklar** içinden ilgili
+  kaynağı seçin. Panel tam metni ve özgün kırpımı tekrar gösterir. Kaynaktaki
+  native metin parçalarından etiketi ve ona ait değeri ayrı ayrı seçip
+  **Gösterilen etiket–değer ilişkisini onaylıyorum** düğmesine basın. İki seçim de
+  başlangıçta boştur; yeni metin/değer yazılmaz, komşu değer otomatik atanmaz.
+  Tek parça metin etiket/değeri ayrı seçmeye izin vermiyorsa farklı kaynakla arayın;
+  bu panel genel form düzenleyicisi değildir. Kırpım gösterilemezse onay verilmez.
+  Onay, yalnızca bu belge SHA’sı, soru ve seçili kaynakların tam içeriği/konumları
+  için kullanıcı beyanıdır. `user_confirmation` ayrı kayıttır;
+  `association=not_inferred`, özgün span/kutular ve `answer_eligible=false` korunur.
+  İlişkiyi **kullanıcı onayladı; uygulama doğrulamadı**. Onaylı kaynağın cevap
+  alıntısı etiketi ve değeri içeren **tam kesit metni** olmalıdır; yalnız etiket
+  veya yalnız değer alıntısı reddedilir. Kaynak/seçim/soru/belge değişirse onay ve
+  eski cevap silinir. Etiket/değer seçimini değiştirmek yeniden onay gerektirir.
+  Onay düğmesi veya yeniden çizim HTTP çağrısı yapmaz; ayrıca **Cevap üret** ve
+  Gemini için belge gönderim onayı gerekir. Formül engeli bu onayla aşılamaz.
 - Formül adayları/grupları veya seçili kesitte matematik gösterimi varsa üretim
   yapılmaz. Metin eşleşmesi tam kaynak bandına genişletilirken bantla örtüşen
   mevcut formüller ve onları içeren gruplar güven bayraklarıyla birlikte korunur;
