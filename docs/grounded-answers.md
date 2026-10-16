@@ -120,13 +120,16 @@ Yanıt gövdesi en çok 64 KiB; üretim çıktısı en çok 1500 token istenir.
   etiket, farklı satırdaki/yandaki metin veya dikey metin bu dar kuralla
   eşleştirilmez; `association=not_inferred` ve özgün kesit korunur. Sayfalar
   arasında eşleştirme yapılmaz. İki farklı alanın aynı değeri taşıması tek
-  başına belirsizlik değildir. Genel tablo/semantik form çözümleyici yoktur.
+  başına belirsizlik değildir. Algılanan hücre sınırını aşan eşleşmeler reddedilir;
+  ayrı span’deki iki nokta ve reddedilen satırlardaki etiketler de yinelenmeye sayılır.
+  Genel tablo/semantik form çözümleyici yoktur.
 - Üretime uygun kaynaklar varsayılan seçilir. Her uygun olmayan BM25 eşleşmesi
   kimliği, sayfası ve engel gerekçesiyle görünür; kaynak kartı/kırpımı silinmez.
   Belirsiz veya matematik kaynağını tekrar seçmek üretimi durdurur. Böylece
   ilgisiz belirsiz bir hit açık bir alanın kullanımını tek başına engellemez.
   Gönderilecek JSON yalnızca seçili tam kesitleri içerir; önizleme ve istek
-  aynı kalır. Noktalama ile biten düz cümleler önceki muhafazakâr yoldadır.
+  aynı kalır. Noktalama ile biten düz cümleler önceki muhafazakâr yoldadır;
+  kesitinde iki noktalı belirsiz alan bulunan değerler noktalama ile uygun hâle gelmez.
 - Formül adayları/grupları veya seçili kesitte matematik gösterimi varsa üretim
   yapılmaz. OCR/formül görüntüleri güvenilir zemin hâline gelmez. Sayfaya ait
   `math_status`, `detection_status`, `answer_eligible=false`, formül ve inceleme

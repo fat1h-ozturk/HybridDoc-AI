@@ -12,13 +12,18 @@ from tests.form_fixtures import certificate_pdf
 QUESTION = 'denizin babasinin adi'
 
 
-def native_pdf(entries, *, rotation=0, text_rotation=0, pages=1):
+def native_pdf(entries, *, rotation=0, text_rotation=0, pages=1, table=False):
     with pymupdf.open() as pdf:
         for _ in range(pages):
             page = pdf.new_page(width=650, height=500)
             page.insert_font(fontname='fixture', fontbuffer=pymupdf.Font('cjk').buffer)
             for x, y, text in entries:
                 page.insert_text((x, y), text, fontsize=11, fontname='fixture', rotate=text_rotation)
+            if table:
+                for x in (25, 170, 330):
+                    page.draw_line((x, 70), (x, 150))
+                for y in (70, 110, 150):
+                    page.draw_line((25, y), (330, y))
             page.set_rotation(rotation)
         pdf.subset_fonts()
         return pdf.tobytes(garbage=4, deflate=True)
@@ -158,3 +163,50 @@ def test_ambiguous_duplicate_elsewhere_cannot_leave_one_clear_conflicting_field(
 def test_colon_in_its_own_native_span_is_explicit():
     _, _, evidence = evidence_for(native_pdf([(35,100,'Baba Adı'),(100,100,':'),(185,100,'One')]))
     assert evidence[0]['association'] == 'explicit_same_row'
+
+
+@pytest.mark.parametrize('entries', [
+    [(35,100,'Baba Adı:'),(185,100,'Unrelated.')],
+    [(35,100,'Baba Adı'),(100,100,':'),(185,100,'Unrelated.')],
+])
+def test_blank_table_cell_cannot_take_adjacent_value(entries):
+    data = native_pdf(entries, table=True)
+    with pymupdf.open(stream=data, filetype='pdf') as pdf:
+        assert len(pdf[0].find_tables().tables[0].rows[0].cells) == 2
+    _, results, evidence = evidence_for(data, 'Baba Adı Unrelated')
+    assert results and evidence
+    assert all(r['source_context']['association'] == 'not_inferred' for r in results)
+    assert all(answers.evidence_issue([e]) for e in evidence)
+
+
+def test_same_cell_field_still_works():
+    _, _, evidence = evidence_for(native_pdf([(35,100,'Baba Adı: One')], table=True))
+    assert evidence[0]['association'] == 'explicit_same_row'
+    assert answers.evidence_issue(evidence) is None
+
+
+def test_separate_colon_competitors_count_against_third_field():
+    entries = [(35,100,'Baba Adı'),(100,100,':'),(185,100,'One'),
+               (350,100,'Baba Adı'),(420,100,':'),(500,100,'Two'),
+               (35,150,'Baba Adı: Three')]
+    _, results, evidence = evidence_for(native_pdf(entries), 'Baba Adı Three')
+    assert results and evidence
+    assert all(r['source_context']['association'] == 'not_inferred' for r in results)
+    assert all(answers.evidence_issue([e]) for e in evidence)
+
+
+@pytest.mark.parametrize('provider', ['Ollama', 'Gemini API'])
+def test_punctuated_ambiguous_value_is_blocked_before_simulated_http(provider):
+    entries = [(35,100,'Baba Adı:'),(185,100,'Deniz.'),
+               (35,130,'Baba Adı:'),(185,130,'Orhan.')]
+    _, results, evidence = evidence_for(native_pdf(entries), 'Baba Adı Deniz')
+    assert any(r['excerpt'] == 'Deniz.' for r in results)
+    assert evidence and all(answers.evidence_issue([e]) for e in evidence)
+    assert all(e['requires_source_review'] for e in evidence)
+    def forbidden(request):
+        pytest.fail('ambiguous value must not reach simulated HTTP transport')
+    for item in evidence:
+        with pytest.raises(answers.AnswerError, match='association=not_inferred'):
+            answers.generate_answer(provider, 'simulated', 'Baba Adı Deniz', [item],
+                                    consent=True, transport=httpx.MockTransport(forbidden))
+        assert answers.evidence_issue([{**item, 'requires_source_review': False}])

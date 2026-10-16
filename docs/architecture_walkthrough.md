@@ -77,7 +77,8 @@ flowchart TD
   açık `Etiket: Değer` ilişkisini `association: "explicit_same_row"` olarak kaydeder.
   `field_relation` özgün span’leri/kutuları ve tam etiket/değer alıntısını korur;
   kaynak SHA ve sayfa değişmez. Yinelenen etiket, boş değer, yarışan sütun veya
-  sarılmış etiket gibi durumlar `not_inferred` kalır. Bu ilişki anlamsal doğruluk,
+  sarılmış etiket veya algılanan hücre sınırını aşan eşleşme gibi durumlar
+  `not_inferred` kalır. Ayrı span’deki iki nokta da yinelenen etikete sayılır. Bu ilişki anlamsal doğruluk,
   kimlik veya formül güveni sağlamaz; `answer_eligible=false` korunur.
 
 ### E. Yerel Çalışma Masası (`apps/workbench.py`)

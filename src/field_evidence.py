@@ -5,20 +5,17 @@ import re
 import pymupdf
 
 from src.retrieval.search_pdf import normalize_text
+from src.ingestion.formula_regions import native_table_cells
 
 
 def explicit_fields(pdf) -> dict:
     """Keep original native spans; reject multi-column, duplicate and wrapped fields."""
-    candidates, labels, span_labels = [], [], Counter()
+    candidates, counts = [], Counter()
     for page in pdf:
         spans = [dict(span, direction=line['dir'], wmode=line['wmode'])
                  for block in page.get_text('dict')['blocks'] if block['type'] == 0
                  for line in block['lines'] for span in line['spans'] if span['text'].strip()]
-        for span in spans:
-            if ':' in span['text']:
-                label = span['text'].split(':', 1)[0].strip()
-                if label:
-                    span_labels[normalize_text(label)] += 1
+        cells, table_error = native_table_cells(page)
         rows = []
         for span in sorted(spans, key=lambda s: (s['origin'][1], s['bbox'][0])):
             if not rows or abs(span['origin'][1] - rows[-1][0]['origin'][1]) > 1:
@@ -26,17 +23,23 @@ def explicit_fields(pdf) -> dict:
             rows[-1].append(span)
         for row in rows:
             row.sort(key=lambda s: s['bbox'][0])
+            text = ' '.join(s['text'].strip() for s in row)
+            for prefix in text.split(':')[:-1]:
+                words = prefix.split()
+                counts.update({normalize_text(' '.join(words[i:]))
+                               for i in range(len(words))
+                               if re.fullmatch(r'[^\W\d_][\w /()\-]{0,99}', ' '.join(words[i:]))})
+            if table_error:
+                continue
             if any(tuple(s['direction']) != (1, 0) or s['wmode'] != 0 for s in row):
                 continue
             if any(a['bbox'][2] > b['bbox'][0] + .5 for a, b in zip(row, row[1:])):
                 continue
-            text = ' '.join(s['text'].strip() for s in row)
             if text.count(':') != 1:
                 continue
             label, value = (part.strip() for part in text.split(':'))
             if not re.fullmatch(r'[^\W\d_][\w /()\-]{0,99}', label):
                 continue
-            labels.append(normalize_text(label))
             if not value:
                 continue
             # A value must be a single native span, not arbitrary neighboring text.
@@ -46,6 +49,9 @@ def explicit_fields(pdf) -> dict:
             box = pymupdf.Rect(row[0]['bbox'])
             for span in row[1:]:
                 box |= pymupdf.Rect(span['bbox'])
+            if (any(c['bbox'].intersects(box) for c in cells)
+                    and not any(c['bbox'].contains(box) for c in cells)):
+                continue
             label_right = row[colon]['bbox'][2]
             # shortcut: wrapped labels need a richer form parser; leave them for source review.
             if any(s not in row and s['bbox'][0] < label_right and s['bbox'][2] > box.x0
@@ -53,11 +59,10 @@ def explicit_fields(pdf) -> dict:
                 continue
             candidates.append((page.number, {'label': label, 'value': value,
                                              'bbox': list(box), 'spans': row}))
-    counts = Counter(labels)
     fields = {}
     for page, field in candidates:
         label = normalize_text(field['label'])
-        if counts[label] == 1 and span_labels[label] <= 1:
+        if counts[label] == 1:
             fields.setdefault(page, []).append(field)
     return fields
 

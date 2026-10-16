@@ -45,9 +45,8 @@ def build_evidence(results: list) -> tuple[list, int]:
         identity = [result.get('source_sha256'), result.get('page_number'), result.get('chunk_id')]
         # Inspect original hit shape locally, without transmitting text outside its crop.
         lines = [line.strip() for line in result.get('excerpt', '').splitlines() if line.strip()]
-        explicit = (bool(lines) and not (context and any(':' in line for line in lines))
-                    and all((not context and re.search(r'\S[^:=]*[:=]\s*\S', line))
-                            or re.search(r'[.!?][”"\x27]?$', line) for line in lines))
+        explicit = (bool(lines) and ':' not in text
+                    and all(re.search(r'[.!?][”"\x27]?$', line) for line in lines))
         item = {
             'id': 'S-' + hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:20],
             'page': result['page_number'], 'text': text,
@@ -89,7 +88,8 @@ def evidence_issue(evidence: list) -> str | None:
             return ('Doğrulanmamış matematik/formül kaynağı seçili; cevap üretimi yapılmaz. '
                     'answer_eligible=false korunur. Kaynak görüntüsünü inceleyin.')
         # Geometry-backed plain fields do not change formula trust or semantic truth.
-        if item.get('association') == 'not_inferred' and item.get('requires_source_review', True):
+        if item.get('association') == 'not_inferred' and (
+                item.get('requires_source_review', True) or ':' in item['text']):
             return ('Alan ilişkisi belirsiz (association=not_inferred); etiket ve yakın değerden '
                     'eşleştirme çıkarılmaz. Cevap yerine kaynak kesitini inceleyin.')
     return None
