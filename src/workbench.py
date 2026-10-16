@@ -52,6 +52,12 @@ class WorkbenchDocument:
                              'ilişkisi otomatik seçilmez. Değer boş veya ilişki belirsizse '
                              'bu kaynaktan kesin cevap çıkarılamaz. Kırpımı inceleyin.'),
                 }
+                formula_page = self.formula_pages[page.number]
+                result['formulas'] = [f for f in formula_page['formulas']
+                                      if pymupdf.Rect(f['bbox']).intersects(band)]
+                formula_ids = {f['id'] for f in result['formulas']}
+                result['formula_groups'] = [g for g in formula_page.get('formula_groups', [])
+                                            if formula_ids.intersection(g['formula_ids'])]
                 context = result['source_context']
                 relation = relation_for_hit(fields.get(page.number, []), hit, context['text'])
                 if relation:

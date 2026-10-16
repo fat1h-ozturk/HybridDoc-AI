@@ -210,3 +210,68 @@ def test_punctuated_ambiguous_value_is_blocked_before_simulated_http(provider):
             answers.generate_answer(provider, 'simulated', 'Baba Adı Deniz', [item],
                                     consent=True, transport=httpx.MockTransport(forbidden))
         assert answers.evidence_issue([{**item, 'requires_source_review': False}])
+
+
+@pytest.mark.parametrize('rotation', [0,90,180,270])
+@pytest.mark.parametrize('provider', ['Ollama', 'Gemini API'])
+def test_split_square_root_field_blocks_before_simulated_http(rotation, provider):
+    data = native_pdf([(35,100,'Result:'),(185,100,'√2')], rotation=rotation)
+    doc, results, evidence = evidence_for(data, 'Result')
+    result = next(r for r in results if r['excerpt'] == 'Result:')
+    context = result['source_context']
+    assert context['association'] == 'explicit_same_row'
+    assert context['field_relation']['value'] == '√2'
+    assert '√2' in context['text']
+    original = doc.formula_pages[0]['formulas']
+    assert len(original) == 1 and original[0]['state'] == 'unresolved'
+    assert original[0]['answer_eligible'] is False
+    assert result['formulas'] == original
+    item = next(e for e in evidence if e['text'] == context['text'])
+    assert item['formulas'] == original
+    assert item['answer_eligible'] is False
+    assert item['page'] == 1 and item['source_sha256'] == original[0]['source_sha256']
+    assert json.loads(answers.request_preview('Result', [item]))['sources'][0]['text'] == context['text']
+    with pymupdf.open(stream=data, filetype='pdf') as pdf:
+        page = pdf[0]
+        page.set_rotation(0)
+        assert context['text'] == page.get_text('text', clip=pymupdf.Rect(context['bbox']), sort=True).strip()
+    assert pymupdf.Pixmap(doc.source_crop(result)).width > 0
+    assert 'matematik' in answers.evidence_issue([item])
+    def forbidden(request):
+        pytest.fail('unresolved formula must not reach simulated HTTP transport')
+    with pytest.raises(answers.AnswerError, match='matematik'):
+        answers.generate_answer(provider, 'simulated', 'Result', [item], consent=True,
+                                transport=httpx.MockTransport(forbidden))
+
+
+@pytest.mark.parametrize('formula_y,blocked', [(80,True),(120,True),(300,False)])
+def test_only_formula_records_overlapping_full_source_band_are_retained(formula_y, blocked):
+    doc, results, evidence = evidence_for(native_pdf([
+        (35,100,'Reference Code: ABC'), (350,formula_y,'√2')]), 'Reference')
+    assert doc.formula_pages[0]['formulas']
+    assert bool(results[0]['formulas']) is blocked
+    assert bool(evidence[0]['formulas']) is blocked
+    assert bool(answers.evidence_issue(evidence)) is blocked
+
+
+def test_source_band_retains_overlapping_wrapped_formula_group():
+    with pymupdf.open() as pdf:
+        page = pdf.new_page(width=500, height=400)
+        page.insert_text((40,60), 'f(x) = C')
+        page.insert_text((110,60), ' on the branch of the initial point. The condition gives ')
+        page.insert_text((420,60), 'K =')
+        page.insert_text((40,76), '2')
+        page.insert_text((46,73), '-', fontsize=6)
+        page.insert_text((51,71), '2', fontsize=6)
+        page.insert_text((51,76), '3', fontsize=6)
+        page.draw_line((51,73), (56,73))
+        page.insert_text((60,76), '. More prose.')
+        data = pdf.tobytes()
+    doc, results, evidence = evidence_for(data, 'branch')
+    groups = doc.formula_pages[0]['formula_groups']
+    assert len(groups) == 1
+    assert results[0]['formula_groups'] == groups
+    assert evidence[0]['formula_groups'] == groups
+    assert groups[0]['answer_eligible'] is False
+    assert all(f['answer_eligible'] is False for f in evidence[0]['formulas'])
+    assert 'matematik' in answers.evidence_issue(evidence)

@@ -72,6 +72,8 @@ flowchart TD
       "note": "Bu kesit çevredeki satır ve sütunları gösterir; etiket–değer ilişkisi otomatik seçilmez."
   }
   ```
+- **Kesit metadatası:** Kaynak bandıyla örtüşen mevcut formül kayıtları ve bu
+  formülleri içeren gruplar, güven bayrakları değiştirilmeden sonuçta korunur.
 - **`source_crop()`:** İlgili koordinat bandını PyMuPDF ile piksel görüntüsüne (`pixmap`) dönüştürür.
 - **İlişkilendirme:** `src/field_evidence.py` yalnızca native yatay tek satırdaki
   açık `Etiket: Değer` ilişkisini `association: "explicit_same_row"` olarak kaydeder.

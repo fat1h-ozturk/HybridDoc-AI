@@ -131,7 +131,9 @@ Yanıt gövdesi en çok 64 KiB; üretim çıktısı en çok 1500 token istenir.
   aynı kalır. Noktalama ile biten düz cümleler önceki muhafazakâr yoldadır;
   kesitinde iki noktalı belirsiz alan bulunan değerler noktalama ile uygun hâle gelmez.
 - Formül adayları/grupları veya seçili kesitte matematik gösterimi varsa üretim
-  yapılmaz. OCR/formül görüntüleri güvenilir zemin hâline gelmez. Sayfaya ait
+  yapılmaz. Metin eşleşmesi tam kaynak bandına genişletilirken bantla örtüşen
+  mevcut formüller ve onları içeren gruplar güven bayraklarıyla birlikte korunur;
+  açık alan ilişkisi bu engeli kaldırmaz. OCR/formül görüntüleri güvenilir zemin hâline gelmez. Sayfaya ait
   `math_status`, `detection_status`, `answer_eligible=false`, formül ve inceleme
   uyarıları korunur. Formülsüz bir metin pasajı aynı sayfadaki başka formül
   yüzünden matematik cevabı olarak sunulmaz; modelden formül çözmesi istenmez.
