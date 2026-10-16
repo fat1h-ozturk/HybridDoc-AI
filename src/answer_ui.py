@@ -18,8 +18,16 @@ def render_answer_panel(results: list, question: str):
         st.warning(f'{omitted} kaynak boş veya kanıt bütçesini aştığı için gönderimden çıkarıldı. '
                    'Metin kesilmedi; tam kaynağı yukarıdan inceleyin.')
     by_id = {item['id']: item for item in evidence}
-    selected = st.multiselect('Gönderilecek kaynaklar', list(by_id), default=list(by_id),
-                             format_func=lambda sid: f"{sid} — Sayfa {by_id[sid]['page']}",
+    usable = []
+    for sid, item in by_id.items():
+        reason = evidence_issue([item])
+        if reason:
+            st.warning(f"Varsayılan seçim dışında: {sid} — Sayfa {item['page']}: {reason} "
+                       'Kaynak yukarıda görünür; seçerseniz üretim durur.')
+        else:
+            usable.append(sid)
+    selected = st.multiselect('Gönderilecek kaynaklar', list(by_id), default=usable,
+                             format_func=lambda sid: f"{sid} — Sayfa {by_id[sid]['page']} — {by_id[sid].get('field_relation', {}).get('label', 'Kaynak')}",
                              key='answer_sources')
     evidence = [by_id[sid] for sid in selected if sid in by_id]
     st.caption('Önizleme: yalnızca aşağıdaki soru ve seçili kaynak JSON’u gönderilir. '
@@ -72,6 +80,9 @@ def render_answer_panel(results: list, question: str):
         if not os.getenv('GEMINI_API_KEY', '').strip():
             st.info('GEMINI_API_KEY eksik. Anahtarı yerel ortamda ayarlayın; sohbetten paylaşmayın. '
                     'AGY aboneliği API erişimi anlamına gelmez.')
+    if configured:
+        st.caption('Yapılandırma hazır. Sağlayıcı bağlantısı, API yetkisi ve model erişimi henüz '
+                   'doğrulanmış değildir; Cevap üret isteği sırasında denetlenir. Kaynak uygunluğu ayrı denetlenir.')
     scope = (provider, model, preview, consent)
     if scope != st.session_state.get('answer_scope'):
         st.session_state.pop('generated_answer', None)

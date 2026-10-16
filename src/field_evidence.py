@@ -1,0 +1,74 @@
+"""Narrow native same-row colon relations, never semantic/identity verification."""
+from collections import Counter
+import re
+
+import pymupdf
+
+from src.retrieval.search_pdf import normalize_text
+
+
+def explicit_fields(pdf) -> dict:
+    """Keep original native spans; reject multi-column, duplicate and wrapped fields."""
+    candidates, labels, span_labels = [], [], Counter()
+    for page in pdf:
+        spans = [dict(span, direction=line['dir'], wmode=line['wmode'])
+                 for block in page.get_text('dict')['blocks'] if block['type'] == 0
+                 for line in block['lines'] for span in line['spans'] if span['text'].strip()]
+        for span in spans:
+            if ':' in span['text']:
+                label = span['text'].split(':', 1)[0].strip()
+                if label:
+                    span_labels[normalize_text(label)] += 1
+        rows = []
+        for span in sorted(spans, key=lambda s: (s['origin'][1], s['bbox'][0])):
+            if not rows or abs(span['origin'][1] - rows[-1][0]['origin'][1]) > 1:
+                rows.append([])
+            rows[-1].append(span)
+        for row in rows:
+            row.sort(key=lambda s: s['bbox'][0])
+            if any(tuple(s['direction']) != (1, 0) or s['wmode'] != 0 for s in row):
+                continue
+            if any(a['bbox'][2] > b['bbox'][0] + .5 for a, b in zip(row, row[1:])):
+                continue
+            text = ' '.join(s['text'].strip() for s in row)
+            if text.count(':') != 1:
+                continue
+            label, value = (part.strip() for part in text.split(':'))
+            if not re.fullmatch(r'[^\W\d_][\w /()\-]{0,99}', label):
+                continue
+            labels.append(normalize_text(label))
+            if not value:
+                continue
+            # A value must be a single native span, not arbitrary neighboring text.
+            colon = next(i for i, s in enumerate(row) if ':' in s['text'])
+            if len(row) - colon > (1 if row[colon]['text'].split(':')[1].strip() else 2):
+                continue
+            box = pymupdf.Rect(row[0]['bbox'])
+            for span in row[1:]:
+                box |= pymupdf.Rect(span['bbox'])
+            label_right = row[colon]['bbox'][2]
+            # shortcut: wrapped labels need a richer form parser; leave them for source review.
+            if any(s not in row and s['bbox'][0] < label_right and s['bbox'][2] > box.x0
+                   and 0 <= box.y0 - s['bbox'][3] < box.height / 2 for s in spans):
+                continue
+            candidates.append((page.number, {'label': label, 'value': value,
+                                             'bbox': list(box), 'spans': row}))
+    counts = Counter(labels)
+    fields = {}
+    for page, field in candidates:
+        label = normalize_text(field['label'])
+        if counts[label] == 1 and span_labels[label] <= 1:
+            fields.setdefault(page, []).append(field)
+    return fields
+
+
+def relation_for_hit(fields: list, hit, context_text: str) -> dict | None:
+    matches = [f for f in fields if pymupdf.Rect(f['bbox']).intersects(hit)]
+    if len(matches) != 1:
+        return None
+    field = matches[0]
+    expected = (field['label'], field['value'])
+    quote = next((line.strip() for line in context_text.splitlines()
+                  if line.count(':') == 1 and tuple(' '.join(part.split())
+                     for part in line.split(':')) == expected), None)
+    return dict(field, quote=quote) if quote else None

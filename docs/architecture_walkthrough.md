@@ -73,7 +73,12 @@ flowchart TD
   }
   ```
 - **`source_crop()`:** İlgili koordinat bandını PyMuPDF ile piksel görüntüsüne (`pixmap`) dönüştürür.
-- **İlişkilendirme:** Otomatik değer ataması yapılmaz (`association: "not_inferred"`).
+- **İlişkilendirme:** `src/field_evidence.py` yalnızca native yatay tek satırdaki
+  açık `Etiket: Değer` ilişkisini `association: "explicit_same_row"` olarak kaydeder.
+  `field_relation` özgün span’leri/kutuları ve tam etiket/değer alıntısını korur;
+  kaynak SHA ve sayfa değişmez. Yinelenen etiket, boş değer, yarışan sütun veya
+  sarılmış etiket gibi durumlar `not_inferred` kalır. Bu ilişki anlamsal doğruluk,
+  kimlik veya formül güveni sağlamaz; `answer_eligible=false` korunur.
 
 ### E. Yerel Çalışma Masası (`apps/workbench.py`)
 - Streamlit tabanlı arayüz; oturum izolasyonu (`tempfile`), kaynak kartları, tam sayfa metni, parça inceleme ve formül HTML raporunu sunar.
@@ -94,7 +99,12 @@ Ham PDF Akışı (PDF motorunun çizim sırası):
 ```
 
 - **Etiket ve Değer Ayrımı:** PDF dosyasında çizim sırası sütun sütun yapılabilir. Ham metin akışında `Baba Adı` etiketinin hemen ardından `Deniz Örnek` gelebilir.
-- **Çözüm:** Sistem etiketi tek başına bir cevapla bağlamaz (`association: "not_inferred"`). Bunun yerine eşleşmenin etrafındaki dikey koordinat bandını (`source_context`) ve orijinal sayfa kırpımını (`source_crop`) ekrana getirerek kararı kullanıcıya bırakır.
+- **Çözüm:** Sistem çizim sırasından veya yalnızca yakınlıktan değer seçmez.
+  Eşleşmenin dikey koordinat bandını (`source_context`) ve özgün sayfa kırpımını
+  (`source_crop`) gösterir. Tek yatay satırdaki açık iki nokta ilişkisi ayrıca
+  kaydedilebilir; belirsiz düzenler `not_inferred` kalır. Cevap paneli uygun
+  kaynakları varsayılan seçer, dışlanan her kaynağı gerekçesiyle görünür tutar.
+  Alan alıntısı etiketi ve değeri birlikte kapsamak zorundadır.
 
 ### Sıralama Skoru (Ranking) vs. Cevap Doğruluğu (Correctness)
 - BM25 skoru (ör. `4.0310`), sorudaki terimlerin belgedeki sıklığını ve uzunluğunu ölçen leksikal bir sıralama metriğidir.

@@ -1,0 +1,160 @@
+"""Synthetic native-geometry regressions; provider checks are OFFLINE SIMULATION."""
+import json
+
+import httpx
+import pymupdf
+import pytest
+
+from src import answers
+from src.workbench import open_upload
+from tests.form_fixtures import certificate_pdf
+
+QUESTION = 'denizin babasinin adi'
+
+
+def native_pdf(entries, *, rotation=0, text_rotation=0, pages=1):
+    with pymupdf.open() as pdf:
+        for _ in range(pages):
+            page = pdf.new_page(width=650, height=500)
+            page.insert_font(fontname='fixture', fontbuffer=pymupdf.Font('cjk').buffer)
+            for x, y, text in entries:
+                page.insert_text((x, y), text, fontsize=11, fontname='fixture', rotate=text_rotation)
+            page.set_rotation(rotation)
+        pdf.subset_fonts()
+        return pdf.tobytes(garbage=4, deflate=True)
+
+
+def evidence_for(data, query=QUESTION):
+    doc = open_upload('synthetic.pdf', data)
+    results = doc.search(query)
+    evidence, _ = answers.build_evidence(results)
+    return doc, results, evidence
+
+
+@pytest.mark.parametrize('inline,order', [(False,'columns'), (False,'reverse'), (True,'reverse')])
+def test_native_explicit_field_has_label_value_original_geometry_and_quote(inline, order):
+    doc, results, evidence = evidence_for(certificate_pdf(colon=True, inline=inline, order=order))
+    father = next(r for r in results if r['excerpt'].startswith('Baba Adı'))
+    context = father['source_context']
+    assert context['association'] == 'explicit_same_row'
+    relation = context['field_relation']
+    assert relation['label'] == 'Baba Adı'
+    assert relation['value'] == 'Orhan Örnek'
+    assert relation['quote'] in context['text']
+    assert 'Baba Adı:' in relation['quote'] and 'Orhan Örnek' in relation['quote']
+    assert relation['spans'] and all(s['text'] and len(s['bbox']) == 4 for s in relation['spans'])
+    assert father['answer_eligible'] is False
+    item = next(s for s in evidence if s.get('field_relation', {}).get('label') == 'Baba Adı')
+    assert item['source_sha256'] == father['source_sha256']
+    assert item['page'] == father['page_number'] == 1
+    assert item['field_relation'] == relation
+    assert answers.evidence_issue([item]) is None
+    assert pymupdf.Pixmap(doc.source_crop(father)).width > 0
+
+
+@pytest.mark.parametrize('entries', [
+    [(35,100,'Baba Adı:'), (185,130,'Other Row Value')],
+    [(35,100,'Baba Adı:'), (185,105,'Wrong Baseline')],
+    [(35,100,'Baba Adı:'), (185,100,'One'), (250,100,'Two')],
+    [(35,100,'Baba Adı:'), (185,100,'One'), (350,100,'Baba Adı:'), (500,100,'Two')],
+    [(35,100,'Baba Adı: One'), (35,140,'Baba Adı: Two')],
+    [(35,100,'Baba Adı: One'), (35,140,'Baba Adı: One')],
+    [(35,100,'Baba Adı: One.'), (35,140,'Baba Adı: Two.')],
+    [(35,100,'Baba Adı: One'), (35,140,'Baba Adı:')],
+    [(35,85,'Baba'), (35,100,'Adı:'), (185,100,'One')],
+    [(35,100,'Baba Adı:'), (35,140,'Anne Adı: Other')],
+])
+def test_ambiguous_geometry_never_becomes_field_evidence(entries):
+    _, results, evidence = evidence_for(native_pdf(entries), 'Baba Adı')
+    assert results
+    assert all(r['source_context']['association'] == 'not_inferred' for r in results
+               if r['excerpt'].startswith(('Baba', 'Adı')))
+    fathers = [e for e in evidence if e.get('association') == 'not_inferred']
+    assert fathers and answers.evidence_issue(fathers)
+
+
+@pytest.mark.parametrize('rotation', [0,90,180,270])
+def test_page_rotation_preserves_native_same_row_relation(rotation):
+    _, _, evidence = evidence_for(native_pdf([(35,100,'Baba Adı:'),(185,100,'One')],rotation=rotation))
+    assert evidence[0]['association'] == 'explicit_same_row'
+
+
+def test_separate_page_text_and_vertical_text_do_not_pair():
+    _, _, evidence = evidence_for(native_pdf([(200,350,'Baba Adı:'),(350,350,'One')],text_rotation=90))
+    assert all(e['association'] == 'not_inferred' for e in evidence)
+    with pymupdf.open() as pdf:
+        pdf.new_page().insert_text((35,100),'Father:')
+        pdf.new_page().insert_text((185,100),'Value')
+        data = pdf.tobytes()
+    _, _, evidence = evidence_for(data, 'Father')
+    assert answers.evidence_issue(evidence)
+
+
+def test_duplicate_label_across_pages_blocks_and_equal_values_on_distinct_fields_work():
+    _, _, evidence = evidence_for(native_pdf([(35,100,'Baba Adı: One')],pages=2))
+    assert answers.evidence_issue(evidence)
+    _, _, evidence = evidence_for(certificate_pdf(colon=True, father='Selin Örnek'))
+    fields = {e['field_relation']['label']:e['field_relation']['value'] for e in evidence}
+    assert fields['Baba Adı'] == fields['Anne Adı'] == 'Selin Örnek'
+
+
+def test_colon_formula_retains_math_guard():
+    _, _, evidence = evidence_for(native_pdf([(35,100,'Result: x = y - 2')]), 'Result')
+    assert 'matematik' in answers.evidence_issue(evidence)
+
+
+def test_simulated_natural_question_and_full_field_citation(monkeypatch):
+    monkeypatch.setenv('GEMINI_API_KEY','offline-fake-key')
+    monkeypatch.setenv('HYBRIDDOC_GEMINI_MODELS','gemini-simulated')
+    _, _, evidence = evidence_for(certificate_pdf(colon=True))
+    source = next(e for e in evidence if e.get('field_relation',{}).get('label') == 'Baba Adı')
+    calls = []
+    def fake(request):
+        calls.append(request)
+        assert json.loads(request.content)['contents'][0]['parts'][0]['text'] == answers.request_preview(QUESTION,[source])
+        output = {'status':'answered','answer':'Baba Adı alanında Orhan Örnek yazıyor.',
+                  'citations':[{'source_id':source['id'],'quote':source['field_relation']['quote']}]}
+        return httpx.Response(200,json={'candidates':[{'finishReason':'STOP','content':{'parts':[{'text':json.dumps(output)}]}}]})
+    assert not calls
+    result = answers.generate_answer('Gemini API','gemini-simulated',QUESTION,[source],consent=True,transport=httpx.MockTransport(fake))
+    assert len(calls) == 1 and result['status'] == 'answered'
+    for quote in ['Baba Adı:', 'Orhan Örnek']:
+        result['citations'][0]['quote'] = quote
+        with pytest.raises(answers.AnswerError):
+            answers.validate_answer(json.dumps(result), [source])
+
+
+def test_unknown_label_is_not_a_document_specific_rule_and_unknown_query_has_no_evidence():
+    _, _, evidence = evidence_for(native_pdf([(35,100,'Reference Code:'),(185,100,'ABC')]), 'Reference')
+    assert evidence[0]['field_relation']['label'] == 'Reference Code'
+    assert answers.evidence_issue(evidence) is None
+    _, results, evidence = evidence_for(certificate_pdf(colon=True), 'quasar')
+    assert results == [] and evidence == []
+    assert 'kaynak' in answers.evidence_issue(evidence)
+
+
+def test_simulated_missing_father_abstains_with_other_clear_sources(monkeypatch):
+    monkeypatch.setenv('GEMINI_API_KEY','offline-fake-key')
+    monkeypatch.setenv('HYBRIDDOC_GEMINI_MODELS','gemini-simulated')
+    _, results, evidence = evidence_for(certificate_pdf(colon=True, father=''))
+    father = next(r for r in results if r['excerpt'] == 'Baba Adı:')
+    assert father['source_context']['association'] == 'not_inferred'
+    usable = [e for e in evidence if not answers.evidence_issue([e])]
+    assert usable and not any(e['field_relation']['label'] == 'Baba Adı' for e in usable)
+    def fake(request):
+        reply = {'status':'abstained','answer':'Baba Adı alanında değer yok; kaynak kesitini inceleyin.', 'citations':[]}
+        return httpx.Response(200,json={'candidates':[{'finishReason':'STOP','content':{'parts':[{'text':json.dumps(reply)}]}}]})
+    result = answers.generate_answer('Gemini API','gemini-simulated',QUESTION,usable,consent=True,transport=httpx.MockTransport(fake))
+    assert result['status'] == 'abstained' and 'değer yok' in result['answer']
+
+
+def test_ambiguous_duplicate_elsewhere_cannot_leave_one_clear_conflicting_field():
+    entries = [(35,100,'Baba Adı: One'), (350,100,'Baba Adı: Two'), (35,150,'Baba Adı: Three')]
+    _, results, evidence = evidence_for(native_pdf(entries))
+    assert all(r['source_context']['association'] == 'not_inferred' for r in results)
+    assert all(answers.evidence_issue([e]) for e in evidence)
+
+
+def test_colon_in_its_own_native_span_is_explicit():
+    _, _, evidence = evidence_for(native_pdf([(35,100,'Baba Adı'),(100,100,':'),(185,100,'One')]))
+    assert evidence[0]['association'] == 'explicit_same_row'

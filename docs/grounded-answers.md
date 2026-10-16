@@ -76,6 +76,9 @@ seçeneği kullanmadan önce bu aktarımı değerlendirin.
    Liste uygulamaya gömülü değildir; katalog değişirse ortam listesini güncelleyin.
    Liste boşsa otomatik veya eski bir model seçilmez. Uygulama anahtar/model
    erişimini otomatik sorgulamaz; `GEMINI_API_KEY` eksikse açık yönlendirme gösterir.
+Yapılandırılmış model/anahtar ve belge onayı bağlantı veya API yetkisi kanıtı
+  değildir. Arayüz kaynak uygunluğunu ayrıca denetler; gerçek erişim yalnızca
+  açık üretim isteğinde anlaşılır.
 3. Ortam değişkenlerini alan terminalden README’deki Streamlit komutunu çalıştırın.
 4. Arayüzde **Gemini API**, katalogdaki model ve kaynakları seçin. Google
    gönderim açıklamasını okuyun; **bu belge için** onay kutusunu işaretleyin.
@@ -105,12 +108,25 @@ Yanıt gövdesi en çok 64 KiB; üretim çıktısı en çok 1500 token istenir.
   Yanıt hiçbir zaman “doğrulanmış” olarak sunulmaz; kaynak incelemesi gerekir.
 - Hiç kanıt yoksa çağrı yapılmaz. Eşleşen kaynakta sorulan bilgi yoksa modelden
   çekimser kalması istenir. Bu istem politikasıdır, model doğruluğu garantisi değildir.
-- `association=not_inferred` korunur. Ayrı etiket ve yakın isimlerden
-  Father/Mother/Student eşleştirmesi yapılmaz. İlk entegrasyon muhafazakârdır:
-  özgün eşleşmedeki satırlar açık `Alan: Değer` biçiminde veya noktalama ile
-  biten cümle görünümünde değilse üretim durur ve kaynak kesiti gösterilir.
-  Bu yapısal kontrol bir semantik form çözümleyici değildir; bazı düz metinleri
-  de incelemeye bırakabilir. Açık alan cümlesi bile ancak alıntı kanıtı sunar.
+- Native yatay metinde aynı taban çizgisinde, tek `:` ile ayrılan açık
+  `Etiket: Değer` satırı varsa `association=explicit_same_row` kaydedilir.
+  Etiket/değer ayrı span’lerde veya tek span’de olabilir; çizim sırası önemli
+  değildir. `field_relation`, özgün span metinlerini/koordinatlarını, satır
+  kutusunu ve kaynak kesitindeki birebir tam satır alıntısını taşır. Sayfa ve
+  kaynak SHA korunur. Bu yalnızca çıkarım ilişkisidir; anlamsal doğruluk veya
+  kişisel kimlik doğrulaması değildir, `answer_eligible=false` değişmez.
+  Alan cevabının alıntısı hem etiketi hem değeri içeren tam satırı kapsamalıdır.
+- Boş değer, yinelenen etiket (aynı değerle bile), yarışan sütunlar, sarılmış
+  etiket, farklı satırdaki/yandaki metin veya dikey metin bu dar kuralla
+  eşleştirilmez; `association=not_inferred` ve özgün kesit korunur. Sayfalar
+  arasında eşleştirme yapılmaz. İki farklı alanın aynı değeri taşıması tek
+  başına belirsizlik değildir. Genel tablo/semantik form çözümleyici yoktur.
+- Üretime uygun kaynaklar varsayılan seçilir. Her uygun olmayan BM25 eşleşmesi
+  kimliği, sayfası ve engel gerekçesiyle görünür; kaynak kartı/kırpımı silinmez.
+  Belirsiz veya matematik kaynağını tekrar seçmek üretimi durdurur. Böylece
+  ilgisiz belirsiz bir hit açık bir alanın kullanımını tek başına engellemez.
+  Gönderilecek JSON yalnızca seçili tam kesitleri içerir; önizleme ve istek
+  aynı kalır. Noktalama ile biten düz cümleler önceki muhafazakâr yoldadır.
 - Formül adayları/grupları veya seçili kesitte matematik gösterimi varsa üretim
   yapılmaz. OCR/formül görüntüleri güvenilir zemin hâline gelmez. Sayfaya ait
   `math_status`, `detection_status`, `answer_eligible=false`, formül ve inceleme
@@ -129,7 +145,7 @@ Yanıt gövdesi en çok 64 KiB; üretim çıktısı en çok 1500 token istenir.
 
 ```bash
 python -m pytest tests/test_answer_demo.py -q -s
-python -m pytest tests/test_answers.py tests/test_workbench_ui.py -q
+python -m pytest tests/test_answers.py tests/test_explicit_fields.py tests/test_workbench_ui.py -q
 python -m pytest -q
 ```
 
@@ -140,6 +156,9 @@ fikstürüdür; **gerçek çıkarım değildir**. HTTPX `MockTransport` kullanı
 Ollama/Gemini’ye bağlantı, API kotası, model indirme veya özel öğrenci belgesi yoktur.
 Streamlit AppTest; seçim, tam gönderim içeriği, onay/reset, normal yeniden
 çizimde çağrı olmaması, alıntılar, hata ve çekimserlik yollarını çalıştırır.
+Ayrık native span + iki nokta alanları için Türkçe doğal soru, anne/baba/öğrenci
+ayrımı, boş/yinelenen/çelişen alanlar, sütun/çizim sırası, sayfa rotasyonu,
+sarılmış etiket, farklı satır ve formül korumaları sentetik PDF’lerle sınanır.
 Donanım performansı ve gerçek model kalitesi bu testlerle ölçülmez.
 
 ## Resmi kaynaklar (15 Ekim 2026’da kontrol edildi)

@@ -420,3 +420,53 @@ def test_invalid_model_citation_is_never_displayed_as_answer(monkeypatch):
     assert 'generated_answer' not in app.session_state
     assert any('alıntı denetimi geçersiz' in item.value for item in app.error)
     assert not any('UNSUPPORTED-SENTINEL' in item.value for item in app.text)
+
+
+def test_simulated_split_field_mixed_sources_explicit_action_and_reset(monkeypatch):
+    """OFFLINE SIMULATION: real PDF/search/UI, invented response via fake HTTP."""
+    import json
+    import httpx
+    import pymupdf
+    from src import answers
+    from src.workbench import open_upload
+    from tests.form_fixtures import certificate_pdf
+
+    monkeypatch.setenv('GEMINI_API_KEY', 'offline-simulation-key')
+    monkeypatch.setenv('HYBRIDDOC_GEMINI_MODELS', 'gemini-3.8-flash')
+    with pymupdf.open(stream=certificate_pdf(colon=True), filetype='pdf') as pdf:
+        pdf[0].insert_text((35, 300), 'adi ambiguous label')
+        data = pdf.tobytes()
+    calls = []
+    def fake(request):
+        calls.append(request)
+        sent = json.loads(json.loads(request.content)['contents'][0]['parts'][0]['text'])
+        father = next(s for s in sent['sources'] if s.get('field_relation',{}).get('label') == 'Baba Adı')
+        assert not any('ambiguous label' in s['text'] for s in sent['sources'])
+        reply = {'status':'answered','answer':'SİMÜLASYON: Baba Adı alanı Orhan Örnek.',
+                 'citations':[{'source_id':father['id'],'quote':father['field_relation']['quote']}]}
+        return httpx.Response(200,json={'candidates':[{'finishReason':'STOP','content':{'parts':[{'text':json.dumps(reply)}]}}]})
+    real_client = httpx.Client
+    monkeypatch.setattr(answers.httpx,'Client',lambda **kw:real_client(**{**kw,'transport':httpx.MockTransport(fake)}))
+    app = AppTest.from_file(str(APP)).run()
+    app.session_state['document'] = open_upload('synthetic.pdf', data)
+    app.run()
+    app.text_input(key='question').set_value('denizin babasinin adi')
+    app.button(key='search').click().run()
+    app.checkbox(key='generation_enabled').check().run()
+    app.selectbox(key='answer_provider').select('Gemini API').run()
+    assert not calls and app.button(key='generate_answer').disabled
+    app.checkbox(key='cloud_consent').check().run()
+    assert not calls and not app.button(key='generate_answer').disabled
+    assert any('Varsayılan seçim dışında' in w.value and 'Alan ilişkisi belirsiz' in w.value for w in app.warning)
+    selected = app.multiselect(key='answer_sources').value
+    assert 0 < len(selected) < len(app.multiselect(key='answer_sources').options)
+    preview = next(t.value for t in app.text if t.value.startswith('{\n  "question"'))
+    app.button(key='generate_answer').click().run()
+    assert not app.exception and len(calls) == 1
+    assert json.loads(calls[0].content)['contents'][0]['parts'][0]['text'] == preview
+    assert app.session_state['generated_answer']['status'] == 'answered'
+    app.selectbox(key='answer_provider').select('Ollama').run()
+    assert 'generated_answer' not in app.session_state and len(calls) == 1
+    app.multiselect(key='answer_sources').set_value([s['id'] for s in answers.build_evidence(app.session_state['results'])[0]]).run()
+    assert app.button(key='generate_answer').disabled
+    assert len(calls) == 1

@@ -3,7 +3,7 @@ import pymupdf
 
 
 def certificate_pdf(*, order='columns', father='Orhan Örnek', columns=1,
-                    stacked=False, second_page=False, inline=False):
+                    stacked=False, second_page=False, inline=False, colon=False):
     with pymupdf.open() as doc:
         page = doc.new_page(width=650, height=500)
         page.insert_font(fontname='fixture', fontbuffer=pymupdf.Font('cjk').buffer)
@@ -19,7 +19,7 @@ def certificate_pdf(*, order='columns', father='Orhan Örnek', columns=1,
                 if inline:
                     entries.append((x, y, f'{label}: {value}'))
                 else:
-                    entries.append((x, y, label))
+                    entries.append((x, y, label + (":" if colon else "")))
                     if value:
                         entries.append((x if stacked else x + 150, y + 20 if stacked else y, value))
         if order == 'columns':
