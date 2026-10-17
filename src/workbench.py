@@ -10,7 +10,7 @@ from src.chunking.text_chunker import chunk_pages, chunk_formula_pages, format_c
 from src.evaluation.review_formulas import generate_formula_review_html
 from src.ingestion.pdf_loader import load_pdf, load_pdf_formulas
 from src.retrieval.search_pdf import BM25Searcher, tokenize
-from src.field_evidence import explicit_fields, relation_for_hit, prose_run_for_hit
+from src.field_evidence import explicit_fields, relation_for_hit
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 MAX_PAGES = 200
@@ -51,7 +51,6 @@ class WorkbenchDocument:
                               for block in page.get_text('dict', clip=band, sort=True)['blocks']
                               for line in block.get('lines', []) for span in line['spans']],
                     'association': 'not_inferred',
-                    'prose_run': prose_run_for_hit(page, hit),
                     'note': ('Bu kesit çevredeki satır ve sütunları gösterir; etiket–değer '
                              'ilişkisi otomatik seçilmez. Değer boş veya ilişki belirsizse '
                              'bu kaynaktan kesin cevap çıkarılamaz. Kırpımı inceleyin.'),

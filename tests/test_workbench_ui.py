@@ -9,6 +9,15 @@ from streamlit.testing.v1 import AppTest
 APP = Path(__file__).resolve().parents[1] / "apps" / "workbench.py"
 
 
+def confirm_first_passage(app):
+    from src import answers
+    sid = answers.build_evidence(app.session_state['results'])[0][0]['id']
+    app.multiselect(key='answer_sources').set_value([sid]).run()
+    app.selectbox(key='confirmation_kind_' + sid).select('passage').run()
+    app.button(key='confirm_passage_' + sid).click().run()
+    return sid
+
+
 def test_demo_question_complete_source_report_and_clear():
     app = AppTest.from_file(str(APP)).run()
     assert not app.exception
@@ -155,7 +164,7 @@ def test_generation_off_local_inventory_and_explicit_request_only(monkeypatch):
         evidence = sent['sources']
         return httpx.Response(200, json={'done': True, 'done_reason': 'stop', 'message': {'role': 'assistant', 'content': json.dumps({
             'status': 'answered', 'answer': '<script>alert(1)</script> Kaynak pasajları alıntılardır.',
-            'citations': [{'source_id': evidence[0]['id'], 'quote': 'Source passages are exact quotes from the document.'}]})}})
+            'citations': [{'source_id': evidence[0]['id'], 'quote': evidence[0]['text']}]})}})
     real_client = httpx.Client
     monkeypatch.setattr(answers.httpx, 'Client', lambda **kw: real_client(**{**kw, 'transport': httpx.MockTransport(handle)}))
     app = AppTest.from_file(str(APP)).run()
@@ -172,6 +181,7 @@ def test_generation_off_local_inventory_and_explicit_request_only(monkeypatch):
     assert app.selectbox(key='ollama_model').options == ['demo:tiny', 'demo:other']
     app.selectbox(key='ollama_model').select('demo:other').run()
     assert len(calls) == 1
+    confirm_first_passage(app)
     preview = next(t.value for t in app.text if '"question": "source passages"' in t.value)
     app.button(key='generate_answer').click().run()
     assert not app.exception
@@ -218,6 +228,7 @@ def test_gemini_requires_document_consent_preview_and_resets(monkeypatch):
     assert app.selectbox(key='gemini_model').options == ['gemini-test', 'gemini-other']
     app.checkbox(key='cloud_consent').check().run()
     assert not sent
+    confirm_first_passage(app)
     preview = next(t.value for t in app.text if '"question": "source passages"' in t.value)
     app.button(key='generate_answer').click().run()
     assert len(sent) == 1
@@ -286,11 +297,14 @@ def test_source_selection_no_evidence_and_answer_error_need_new_explicit_click(m
     app.checkbox(key='generation_enabled').check().run()
     app.selectbox(key='answer_provider').select('Gemini API').run()
     app.checkbox(key='cloud_consent').check().run()
+    confirm_first_passage(app)
     selected = app.multiselect(key='answer_sources').value
     app.multiselect(key='answer_sources').set_value([]).run()
     assert app.button(key='generate_answer').disabled
     assert not requests
     app.multiselect(key='answer_sources').set_value(selected).run()
+    assert app.button(key='generate_answer').disabled
+    confirm_first_passage(app)
     app.button(key='generate_answer').click().run()
     assert not app.exception and len(requests) == 1
     assert any('kota' in item.value for item in app.error)
@@ -376,6 +390,7 @@ def test_direct_document_replacement_resets_consent_and_answer(monkeypatch):
     app.checkbox(key='generation_enabled').check().run()
     app.selectbox(key='answer_provider').select('Gemini API').run()
     app.checkbox(key='cloud_consent').check().run()
+    confirm_first_passage(app)
     app.button(key='generate_answer').click().run()
     assert 'generated_answer' in app.session_state
     with pymupdf.open() as pdf:
@@ -415,6 +430,7 @@ def test_invalid_model_citation_is_never_displayed_as_answer(monkeypatch):
     app.checkbox(key='generation_enabled').check().run()
     app.selectbox(key='answer_provider').select('Gemini API').run()
     app.checkbox(key='cloud_consent').check().run()
+    confirm_first_passage(app)
     app.button(key='generate_answer').click().run()
     assert not app.exception
     assert 'generated_answer' not in app.session_state
@@ -515,7 +531,7 @@ def test_simulated_configured_no_colon_duplicate_values_cannot_be_selected_as_pr
     assert 'generated_answer' not in app.session_state
 
 
-@pytest.mark.parametrize('prose', ['mixed_font', 'wrapped', 'standalone'])
+@pytest.mark.parametrize('prose', ['mixed_font', 'wrapped', 'standalone', 'heading'])
 def test_simulated_configured_prose_generates_only_on_click(monkeypatch, prose):
     """OFFLINE SIMULATION: native prose with real retrieval and fake Gemini HTTP."""
     import json
@@ -533,6 +549,8 @@ def test_simulated_configured_prose_generates_only_on_click(monkeypatch, prose):
         sent = json.loads(json.loads(request.content)['contents'][0]['parts'][0]['text'])
         source = sent['sources'][0]
         assert 'Ankara is the capital of' in source['text'] and 'Turkey' in source['text']
+        assert source['user_confirmation']['kind'] == 'passage'
+        assert 'label' not in source['user_confirmation'] and 'value' not in source['user_confirmation']
         assert ('a major city.' if prose == 'wrapped' else 'Turkey.') in source['text']
         reply = {'status': 'answered', 'answer': 'SİMÜLASYON: Türkiye’nin başkenti Ankara’dır.',
                  'citations': [{'source_id': source['id'], 'quote': source['text']}]}
@@ -542,6 +560,7 @@ def test_simulated_configured_prose_generates_only_on_click(monkeypatch, prose):
     monkeypatch.setattr(answers.httpx, 'Client', lambda **kw: real_client(**{**kw, 'transport': httpx.MockTransport(fake)}))
     app = AppTest.from_file(str(APP)).run()
     data = {'mixed_font': mixed_font_prose_pdf, 'wrapped': wrapped_prose_pdf,
+            'heading': lambda: native_pdf([(35, 20, 'Cities'), (35, 100, 'Ankara is the capital of Turkey.')]),
             'standalone': lambda: native_pdf([(35, 100, 'Ankara is the capital of Turkey.')])}[prose]()
     app.session_state['document'] = open_upload('synthetic.pdf', data)
     app.run()
@@ -552,15 +571,9 @@ def test_simulated_configured_prose_generates_only_on_click(monkeypatch, prose):
     assert not calls and app.button(key='generate_answer').disabled
     app.checkbox(key='cloud_consent').check().run()
     assert not app.exception and not calls
-    if prose == 'wrapped':
-        assert app.multiselect(key='answer_sources').value == []
-        sid = answers.build_evidence(app.session_state['results'])[0][0]['id']
-        app.multiselect(key='answer_sources').set_value([sid]).run()
-        assert app.button(key='generate_answer').disabled
-        app.selectbox(key='relation_label_' + sid).select('Ankara is the capital of Turkey and').run()
-        app.selectbox(key='relation_value_' + sid).select('a major city.').run()
-        app.button(key='confirm_relation_' + sid).click().run()
-        assert not calls
+    assert app.multiselect(key='answer_sources').value == []
+    confirm_first_passage(app)
+    assert not calls
     assert len(app.multiselect(key='answer_sources').value) == 1
     assert not app.button(key='generate_answer').disabled
     preview = next(t.value for t in app.text if t.value.startswith('{\n  "question"'))

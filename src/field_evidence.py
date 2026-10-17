@@ -1,4 +1,4 @@
-"""Native source geometry for prose runs and narrow same-row colon relations."""
+"""Native source geometry for narrow same-row colon relations."""
 from collections import Counter
 import re
 
@@ -18,50 +18,6 @@ def _native_rows(page) -> list:
             rows.append([])
         rows[-1].append(span)
     return rows
-
-
-def prose_run_for_hit(page, hit) -> str:
-    """Keep contiguous font runs; detached incomplete text requires confirmation."""
-    runs = []
-    for row in _native_rows(page):
-        run = None
-        for span in sorted(row, key=lambda s: s['bbox'][0]):
-            box = pymupdf.Rect(span['bbox'])
-            horizontal = tuple(span['direction']) == (1, 0) and span['wmode'] == 0
-            if (run and horizontal and run['horizontal']
-                    and -.5 <= box.x0 - run['bbox'].x1 <= max(run['size'], span['size']) / 2):
-                run['bbox'] |= box
-                run['text'] += span['text']
-                run['size'] = max(run['size'], span['size'])
-            else:
-                run = dict(bbox=box, text=span['text'], size=span['size'], horizontal=horizontal)
-                runs.append(run)
-    matches = [run for run in runs if run['bbox'].intersects(hit)]
-    if len(matches) != 1 or not matches[0]['horizontal']:
-        return ''
-    selected = matches[0]
-    box = selected['bbox']
-    paragraphs = [block for block in page.get_text('dict')['blocks']
-                  if block['type'] == 0 and pymupdf.Rect(block['bbox']).contains(box)]
-    complete_paragraph = None
-    if len(paragraphs) == 1:
-        lines = paragraphs[0]['lines']
-        if len(lines) > 1 and all(
-                tuple(line['dir']) == (1, 0) and line['wmode'] == 0
-                and re.search(r'[.!?][”"\x27]?$', ''.join(s['text'] for s in line['spans']).strip())
-                for line in lines):
-            complete_paragraph = pymupdf.Rect(paragraphs[0]['bbox'])
-    for other in runs:
-        if other is selected:
-            continue
-        peer = other['bbox']
-        if peer.y0 < box.y1 and box.y0 < peer.y1:
-            return ''
-        if (peer.x0 < box.x1 and box.x0 < peer.x1
-                and not (complete_paragraph and not complete_paragraph.intersects(peer))
-                and not re.search(r'[.!?][”"\x27]?$', other['text'].strip())):
-            return ''
-    return selected['text']
 
 
 def explicit_fields(pdf) -> dict:

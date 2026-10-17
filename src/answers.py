@@ -20,10 +20,12 @@ Father/Mother/Student associations. association=not_inferred means extraction or
 nearby names, rows or columns do not establish a relationship. explicit_same_row records only a native horizontal Label: Value extraction relation,
 not verified semantic truth or personal identity. For these fields cite the complete
 field_relation.quote containing BOTH label and value. Only an explicit
-user_confirmation can attest an otherwise ambiguous ordinary label/value relation:
-it is the user's attestation, not application verification or semantic truth.
-For a user-confirmed source cite its COMPLETE text, including label and value.
-Without such confirmation, do not infer a relation from not_inferred sources. An explicit
+user_confirmation with kind=relation can attest an otherwise ambiguous ordinary
+label/value relation. kind=passage only approves the complete passage as evidence;
+it does NOT attest any label/value relation. Both are user attestations, not
+application verification or semantic truth. For any user-confirmed source cite
+its COMPLETE text. Without kind=relation, do not infer a relation from
+not_inferred sources. An explicit
 statement in the evidence may support a factual answer. If the requested fact is
 missing or ambiguous, abstain and direct the user to inspect the source.
 All formula trust flags remain in force: answer_eligible=false is never upgraded.
@@ -47,17 +49,13 @@ def build_evidence(results: list) -> tuple[list, int]:
         context = result.get('source_context') or {}
         text = context.get('text') if context.get('text') else result.get('excerpt', '')
         identity = [result.get('source_sha256'), result.get('page_number'), result.get('chunk_id')]
-        # Inspect original hit shape locally, without transmitting text outside its crop.
-        lines = [line.strip() for line in context.get('prose_run', result.get('excerpt', '')).splitlines() if line.strip()]
-        explicit = (bool(lines) and ':' not in text
-                    and all(re.search(r'[.!?][”"\x27]?$', line) for line in lines))
         item = {
             'id': 'S-' + hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:20],
             'page': result['page_number'], 'text': text,
             'source_sha256': result.get('source_sha256'),
             'source_bbox': context.get('bbox'),
             'source_spans': context.get('spans', []),
-            'requires_source_review': not explicit,
+            'requires_source_review': context.get('association') != 'explicit_same_row',
             'association': context.get('association', 'not_inferred'),
             'answer_eligible': result.get('answer_eligible', False),
             'detection_status': result.get('detection_status'),
@@ -107,19 +105,26 @@ def relation_choices(item: dict) -> list[str]:
                              if text.strip() and text.strip() in item['text']))
 
 
-def confirm_source_relation(evidence: list, source_id: str, question: str, label: str, value: str) -> dict:
-    """Record a user's exact existing-line choices; never rewrite extraction data."""
+def confirm_source_passage(evidence: list, source_id: str, question: str) -> dict:
+    """Attest the complete selected passage without asserting a field relation."""
     item = next((s for s in evidence if s['id'] == source_id), None)
-    if item is None or math_evidence_issue(item):
-        raise AnswerError('Bu kaynak için alan onayı kullanılamaz; matematik koruması değişmez.')
-    lines = relation_choices(item)
-    if (not question.strip() or not item.get('source_sha256')
-            or label not in lines or value not in lines or label == value):
-        raise AnswerError('Aynı kaynak kesitinden ayrı, dolu etiket ve değer metinlerini seçin.')
-    return {'document_sha256': item['source_sha256'],
+    if (item is None or math_evidence_issue(item) or not question.strip()
+            or not item.get('source_sha256') or not item['text'].strip()):
+        raise AnswerError('Bu kaynak için pasaj onayı kullanılamaz; matematik koruması değişmez.')
+    return {'kind': 'passage', 'document_sha256': item['source_sha256'],
             'question_sha256': hashlib.sha256(question.encode()).hexdigest(),
             'evidence_fingerprint': evidence_fingerprint(evidence),
-            'source_id': source_id, 'label': label, 'value': value}
+            'source_id': source_id}
+
+
+def confirm_source_relation(evidence: list, source_id: str, question: str, label: str, value: str) -> dict:
+    """Record a user's exact existing-line choices; never rewrite extraction data."""
+    record = confirm_source_passage(evidence, source_id, question)
+    item = next(s for s in evidence if s['id'] == source_id)
+    lines = relation_choices(item)
+    if label not in lines or value not in lines or label == value:
+        raise AnswerError('Aynı kaynak kesitinden ayrı, dolu etiket ve değer metinlerini seçin.')
+    return dict(record, kind='relation', label=label, value=value)
 
 
 def _confirmation_matches(item: dict, evidence: list, question: str | None) -> bool:
@@ -127,7 +132,12 @@ def _confirmation_matches(item: dict, evidence: list, question: str | None) -> b
     if not isinstance(record, dict):
         return False
     try:
-        expected = confirm_source_relation(evidence, item['id'], question or '_', record['label'], record['value'])
+        if record.get('kind') == 'relation':
+            expected = confirm_source_relation(evidence, item['id'], question or '_', record['label'], record['value'])
+        elif record.get('kind') == 'passage':
+            expected = confirm_source_passage(evidence, item['id'], question or '_')
+        else:
+            return False
         if question is None:
             expected['question_sha256'] = record['question_sha256']
         return record == expected
@@ -141,12 +151,10 @@ def evidence_issue(evidence: list, *, question: str | None = None) -> str | None
     for item in evidence:
         if issue := math_evidence_issue(item):
             return issue
-        # Geometry-backed plain fields do not change formula trust or semantic truth.
-        if item.get('association') == 'not_inferred' and (
-                item.get('requires_source_review', True) or ':' in item['text']) and not _confirmation_matches(item, evidence, question):
+        if item.get('association') != 'explicit_same_row' and not _confirmation_matches(item, evidence, question):
             return ('Alan ilişkisi belirsiz (association=not_inferred); etiket ve yakın değerden '
                     'eşleştirme çıkarılmaz. İlgili kaynağı seçip metin ve kırpımı inceleyin; '
-                    'gösterilen etiket–değer ilişkisini açıkça onaylayabilir veya farklı sözcüklerle arayabilirsiniz.')
+                    'tam pasajı kaynak olarak veya etiket–değer ilişkisini ayrı olarak onaylayabilirsiniz.')
     return None
 
 

@@ -55,8 +55,8 @@ def test_stacked_values_require_confirmation_regardless_of_words_or_native_block
             answers.validate_answer(json.dumps(reply), evidence)
 
 
-@pytest.mark.parametrize('native_block', [False, True])
-def test_simulated_ui_stacked_values_need_explicit_confirmation(monkeypatch, native_block):
+@pytest.mark.parametrize('layout', ['stacked', 'native_block', 'indented', 'values_block'])
+def test_simulated_ui_stacked_values_need_explicit_confirmation(monkeypatch, layout):
     from streamlit.testing.v1 import AppTest
     from tests.test_explicit_fields import native_pdf
     monkeypatch.setenv('GEMINI_API_KEY', 'offline-simulation-key')
@@ -73,9 +73,13 @@ def test_simulated_ui_stacked_values_need_explicit_confirmation(monkeypatch, nat
             'parts': [{'text': json.dumps(reply)}]}}]})
     real_client = httpx.Client
     monkeypatch.setattr(answers.httpx, 'Client', lambda **kw: real_client(**{**kw, 'transport': httpx.MockTransport(fake)}))
+    x = 185 if layout in ('indented', 'values_block') else 35
     entries = ([(35, 100, 'Baba Adı\nDeniz Örnek.'), (35, 220, 'Baba Adı\nOrhan Örnek.')]
-               if native_block else [(35, 100, 'Baba Adı'), (35, 120, 'Deniz Örnek.'),
-                                     (35, 220, 'Baba Adı'), (35, 240, 'Orhan Örnek.')])
+               if layout == 'native_block' else [(35, 100, 'Baba Adı'), (x, 120, 'Deniz Örnek.'),
+                                                 (35, 220, 'Baba Adı'), (x, 240, 'Orhan Örnek.')])
+    if layout == 'values_block':
+        entries = [(35, 100, 'Baba Adı'), (x, 120, 'Deniz Örnek.\nOrhan Örnek.'),
+                   (35, 220, 'Baba Adı')]
     app = AppTest.from_file(str(APP)).run()
     app.session_state['document'] = open_upload('invented.pdf', native_pdf(entries))
     app.run()
@@ -101,6 +105,58 @@ def test_simulated_ui_stacked_values_need_explicit_confirmation(monkeypatch, nat
     assert app.session_state['generated_answer']['status'] == 'answered'
 
 
+@pytest.mark.parametrize('grouped', [False, True])
+@pytest.mark.parametrize('rotation', [0, 90, 180, 270])
+def test_indented_values_cannot_bypass_backend_confirmation(grouped, rotation):
+    from tests.test_explicit_fields import native_pdf
+    entries = [(35, 100, 'Baba Adı'), (35, 220, 'Baba Adı')]
+    entries += ([(185, 120, 'Deniz Örnek.\nOrhan Örnek.')] if grouped else
+                [(185, 120, 'Deniz Örnek.'), (185, 240, 'Orhan Örnek.')])
+    document = open_upload('invented.pdf', native_pdf(entries, rotation=rotation))
+    results = document.search('Baba Adı Deniz')
+    hit = next(r for r in results if r['excerpt'] == 'Deniz Örnek.')
+    evidence, _ = answers.build_evidence([hit])
+    assert evidence[0]['requires_source_review']
+    assert evidence[0]['association'] == 'not_inferred'
+    evidence[0]['requires_source_review'] = False
+    for provider in ('Ollama', 'Gemini API'):
+        with pytest.raises(answers.AnswerError, match='association=not_inferred'):
+            answers.generate_answer(provider, 'simulated', 'Baba Adı Deniz', evidence, consent=True,
+                                    transport=httpx.MockTransport(lambda r: pytest.fail('unconfirmed source sent HTTP')))
+
+
+def test_single_span_passage_confirmation_preserves_source_and_requires_full_quote():
+    import hashlib
+    import pymupdf
+    from tests.test_explicit_fields import native_pdf
+    data = native_pdf([(35, 20, 'Cities'), (35, 100, 'Ankara is the capital of Turkey.')])
+    document = open_upload('invented.pdf', data)
+    results = document.search('Turkey')
+    evidence, _ = answers.build_evidence(results)
+    assert len(evidence) == 1 and len(evidence[0]['source_spans']) == 1
+    item = evidence[0]
+    original = copy.deepcopy(item)
+    assert answers.evidence_issue(evidence)
+    item['user_confirmation'] = answers.confirm_source_passage(evidence, item['id'], 'Turkey')
+    assert answers.evidence_issue(evidence, question='Turkey') is None
+    assert item['user_confirmation']['kind'] == 'passage'
+    assert 'label' not in item['user_confirmation'] and 'value' not in item['user_confirmation']
+    assert {k: v for k, v in item.items() if k != 'user_confirmation'} == original
+    assert item['source_sha256'] == hashlib.sha256(data).hexdigest()
+    assert item['association'] == 'not_inferred' and item['answer_eligible'] is False
+    with pymupdf.open(stream=data, filetype='pdf') as pdf:
+        assert item['text'] == 'Ankara is the capital of Turkey.'
+        assert item['text'] == pdf[0].get_text('text', clip=pymupdf.Rect(item['source_bbox']), sort=True).strip()
+    assert pymupdf.Pixmap(document.source_crop(results[0])).width > 0
+    reply = dict(status='answered', answer='SİMÜLASYON: Ankara.',
+                 citations=[dict(source_id=item['id'], quote=item['text'])])
+    assert answers.validate_answer(json.dumps(reply), evidence)['status'] == 'answered'
+    for quote in ['Turkey.', 'Ankara', 'fabricated passage']:
+        reply['citations'][0]['quote'] = quote
+        with pytest.raises(answers.AnswerError):
+            answers.validate_answer(json.dumps(reply), evidence)
+
+
 def test_confirmation_keeps_raw_provenance_and_requires_complete_citation():
     evidence = ambiguous_evidence()
     original = copy.deepcopy(evidence)
@@ -122,11 +178,13 @@ def test_confirmation_keeps_raw_provenance_and_requires_complete_citation():
             answers.validate_answer(json.dumps(reply), evidence)
 
 
-@pytest.mark.parametrize('change', ['question', 'document', 'text', 'box', 'selection'])
-def test_confirmation_cannot_be_reused_outside_exact_scope(change):
+@pytest.mark.parametrize('kind', ['relation', 'passage'])
+@pytest.mark.parametrize('change', ['question', 'document', 'text', 'box', 'selection', 'spans', 'page', 'kind'])
+def test_confirmation_cannot_be_reused_outside_exact_scope(change, kind):
     evidence = ambiguous_evidence()
-    evidence[0]['user_confirmation'] = answers.confirm_source_relation(
-        evidence, evidence[0]['id'], QUESTION, 'Baba Adı', 'Orhan Örnek')
+    evidence[0]['user_confirmation'] = (answers.confirm_source_passage(evidence, evidence[0]['id'], QUESTION)
+                                        if kind == 'passage' else answers.confirm_source_relation(
+                                            evidence, evidence[0]['id'], QUESTION, 'Baba Adı', 'Orhan Örnek'))
     question = QUESTION
     if change == 'question':
         question = 'annesinin adi'
@@ -136,6 +194,12 @@ def test_confirmation_cannot_be_reused_outside_exact_scope(change):
         evidence[0]['text'] += '\nOther source value'
     elif change == 'box':
         evidence[0]['source_bbox'] = [0, 0, 100, 200]
+    elif change == 'spans':
+        evidence[0]['source_spans'][0]['text'] = 'changed native text'
+    elif change == 'page':
+        evidence[0]['page'] = 2
+    elif change == 'kind':
+        evidence[0]['user_confirmation']['kind'] = 'automatic'
     else:
         evidence.append({**evidence[0], 'id': 'different', 'user_confirmation': None})
     assert answers.evidence_issue(evidence, question=question)
@@ -144,11 +208,14 @@ def test_confirmation_cannot_be_reused_outside_exact_scope(change):
                                 transport=httpx.MockTransport(lambda r: pytest.fail('stale confirmation sent HTTP')))
 
 
+@pytest.mark.parametrize('kind', ['relation', 'passage'])
 @pytest.mark.parametrize('math', ['formula', 'group', 'syntax'])
-def test_user_confirmation_cannot_override_math(math):
+def test_user_confirmation_cannot_override_math(math, kind):
     evidence = ambiguous_evidence()
     evidence[0]['user_confirmation'] = answers.confirm_source_relation(
         evidence, evidence[0]['id'], QUESTION, 'Baba Adı', 'Orhan Örnek')
+    if kind == 'passage':
+        evidence[0]['user_confirmation'] = answers.confirm_source_passage(evidence, evidence[0]['id'], QUESTION)
     if math == 'formula':
         evidence[0]['formulas'] = [{'answer_eligible': False}]
     elif math == 'group':
@@ -157,6 +224,8 @@ def test_user_confirmation_cannot_override_math(math):
         evidence[0]['text'] += '\nx = y + 2'
     with pytest.raises(answers.AnswerError):
         answers.confirm_source_relation(evidence, evidence[0]['id'], QUESTION, 'Baba Adı', 'Orhan Örnek')
+    with pytest.raises(answers.AnswerError):
+        answers.confirm_source_passage(evidence, evidence[0]['id'], QUESTION)
     assert 'matematik' in answers.evidence_issue(evidence, question=QUESTION)
 
 
@@ -270,5 +339,73 @@ def test_simulated_ui_math_has_no_confirmation_override(monkeypatch):
     sid = answers.build_evidence(app.session_state['results'])[0][0]['id']
     app.multiselect(key='answer_sources').set_value([sid]).run()
     assert not app.exception and app.button(key='generate_answer').disabled
-    assert not any(b.key.startswith('confirm_relation_') for b in app.button if b.key)
+    assert not any(b.key.startswith(('confirm_relation_', 'confirm_passage_')) for b in app.button if b.key)
     assert any('matematik/formül' in w.value for w in app.warning)
+
+
+def test_simulated_ui_passage_consent_mode_and_question_invalidation(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    from tests.test_explicit_fields import native_pdf
+    monkeypatch.setenv('GEMINI_API_KEY', 'offline-simulation-key')
+    monkeypatch.setenv('HYBRIDDOC_GEMINI_MODELS', 'gemini-test')
+    real_client = httpx.Client
+    monkeypatch.setattr(answers.httpx, 'Client', lambda **kw: real_client(**{
+        **kw, 'transport': httpx.MockTransport(lambda r: pytest.fail('confirmation must not send HTTP'))}))
+    app = AppTest.from_file(str(APP)).run()
+    app.session_state['document'] = open_upload('invented.pdf', native_pdf([
+        (35, 20, 'Cities'), (35, 100, 'Ankara is the capital of Turkey.')]))
+    app.run()
+    app.text_input(key='question').set_value('Turkey')
+    app.button(key='search').click().run()
+    app.checkbox(key='generation_enabled').check().run()
+    app.selectbox(key='answer_provider').select('Gemini API').run()
+    sid = answers.build_evidence(app.session_state['results'])[0][0]['id']
+    app.multiselect(key='answer_sources').set_value([sid]).run()
+    app.selectbox(key='confirmation_kind_' + sid).select('passage').run()
+    assert app.get('image') and app.button(key='generate_answer').disabled
+    assert not any(s.key == 'relation_label_' + sid for s in app.selectbox)
+    app.button(key='confirm_passage_' + sid).click().run()
+    app.run()
+    assert not app.exception and app.button(key='generate_answer').disabled
+    assert app.session_state['source_confirmations'][sid]['kind'] == 'passage'
+    app.checkbox(key='cloud_consent').check().run()
+    assert not app.button(key='generate_answer').disabled
+    app.selectbox(key='confirmation_kind_' + sid).select('relation').run()
+    assert app.button(key='generate_answer').disabled and not app.session_state['source_confirmations']
+    app.selectbox(key='confirmation_kind_' + sid).select('passage').run()
+    assert app.button(key='generate_answer').disabled
+    app.button(key='confirm_passage_' + sid).click().run()
+    app.text_input(key='question').set_value('Ankara').run()
+    assert not app.session_state.get('source_confirmations')
+    assert 'generated_answer' not in app.session_state
+    app.button(key='search').click().run()
+    app.checkbox(key='generation_enabled').check().run()
+    app.multiselect(key='answer_sources').set_value([sid]).run()
+    app.selectbox(key='confirmation_kind_' + sid).select('passage').run()
+    assert app.button(key='generate_answer').disabled
+    app.button(key='confirm_passage_' + sid).click().run()
+    assert app.session_state['source_confirmations']
+    app.checkbox(key='generation_enabled').uncheck().run()
+    assert not app.session_state.get('source_confirmations')
+    app.button(key='clear').click().run()
+    assert 'document' not in app.session_state and not app.session_state.get('source_confirmations')
+
+
+def test_simulated_ui_passage_cannot_confirm_without_source_crop(monkeypatch):
+    from streamlit.testing.v1 import AppTest
+    from tests.test_explicit_fields import native_pdf
+    document = open_upload('invented.pdf', native_pdf([(35, 100, 'Ankara is the capital of Turkey.')]))
+    def unavailable(*args):
+        raise ValueError('synthetic unavailable crop')
+    monkeypatch.setattr(document, 'source_crop', unavailable)
+    app = AppTest.from_file(str(APP)).run()
+    app.session_state['document'] = document
+    app.run()
+    app.text_input(key='question').set_value('Turkey')
+    app.button(key='search').click().run()
+    app.checkbox(key='generation_enabled').check().run()
+    sid = answers.build_evidence(app.session_state['results'])[0][0]['id']
+    app.multiselect(key='answer_sources').set_value([sid]).run()
+    app.selectbox(key='confirmation_kind_' + sid).select('passage').run()
+    assert not app.exception and app.button(key='confirm_passage_' + sid).disabled
+    assert app.button(key='generate_answer').disabled and not app.session_state['source_confirmations']

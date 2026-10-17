@@ -74,14 +74,11 @@ flowchart TD
   ```
 - **Kesit metadatası:** Kaynak bandıyla örtüşen mevcut formül kayıtları ve bu
   formülleri içeren gruplar, güven bayrakları değiştirilmeden sonuçta korunur.
-  Aynı satırdaki bitişik font span’leri `prose_run` içinde birlikte
-  değerlendirilir. Ayrık sütunlar ve aynı sütundaki tamamlanmamış metin
-  parçaları kullanıcı onayı gerektirir; dikey mesafe, sözcük sayısı veya
-  native blok üyeliği bunu değiştirmez. Native bloklar etiket ve değer de
-  içerebildiğinden satırlar otomatik birleştirilmez; bu biçimdeki paragraf
-  devamları da onay akışını kullanır. Her satırı tamamlanmış çok satırlı
-  cümle blokları ayrı başlıklardan bağımsız değerlendirilir.
-  Özgün span’ler ve tam kesit korunur.
+  Noktalama, sözcük sayısı, konum veya native blok üyeliği sıradan metni
+  otomatik olarak üretime uygun yapmaz. `not_inferred` kanıt için kullanıcı
+  tam pasajın kaynak kullanımını ya da ayrı etiket–değer ilişkisini onaylar.
+  Tek span, sarılmış paragraf ve karışık font metni tam pasaj olarak
+  onaylanabilir; özgün span’ler ve tam kesit korunur.
 - **`source_crop()`:** İlgili koordinat bandını PyMuPDF ile piksel görüntüsüne (`pixmap`) dönüştürür.
 - **İlişkilendirme:** `src/field_evidence.py` yalnızca native yatay tek satırdaki
   açık `Etiket: Değer` ilişkisini `association: "explicit_same_row"` olarak kaydeder.
@@ -116,66 +113,17 @@ Ham PDF Akışı (PDF motorunun çizim sırası):
   kaydedilebilir; belirsiz düzenler `not_inferred` kalır. Cevap paneli uygun
   kaynakları varsayılan seçer, dışlanan her kaynağı gerekçesiyle görünür tutar.
   Alan alıntısı etiketi ve değeri birlikte kapsamak zorundadır.
-- **Kullanıcı ilişki onayı:** Cevap panelinde kullanıcı seçili belirsiz sıradan
-  kaynağın tam metnini ve özgün kırpımını inceler, native span metinlerinden
-  etiket/değeri ayrı seçip açık onay verir. `source_context.spans` metin ve
-  kutuları korur; `user_confirmation` belge SHA’sı, soru özeti ve seçili ham
-  kanıt parmak izine bağlı ayrı bir beyandır. `not_inferred` ve formül güveni
-  değişmez. Seçim/soru/belge veya etiket/değer değişikliği onayı ve cevabı
-  geçersizleştirir. Onay çağrı yapmaz; üretim düğmesi ve bulut onayı ayrıdır.
-  Onaylı kaynak için alıntı tam kesiti kapsar; uygulama ilişkiyi doğruladığını
-  iddia etmez. Matematik/formül kaynakları bu yolla kullanılamaz.
-
-### Sıralama Skoru (Ranking) vs. Cevap Doğruluğu (Correctness)
-- BM25 skoru (ör. `4.0310`), sorudaki terimlerin belgedeki sıklığını ve uzunluğunu ölçen leksikal bir sıralama metriğidir.
-- Yüksek skor, bilginin sorunun cevabı olduğunu veya doğruluğunu kanıtlamaz; sadece eşleşen pasajı işaret eder.
-- `answer_eligible=false` bayrağı, arama sonucunun doğrudan "cevap" olarak kabul edilmesini engeller.
-
----
-
-## 4. Uygulamalı Laboratuvar (Hands-on Lab)
-
-Tüm komutları repo kök dizininde `.venv/bin/python` ile çalıştırabilirsiniz:
-
-### Adım 1: Sayfa Metnini ve Metaverisini İnceleme
-```bash
-.venv/bin/python -m src.ingestion.pdf_loader sample_docs/workbench_demo.pdf
-```
-*Beklenen Çıktı:* Toplam 2 sayfa okunur, 1. sayfanın 209 karakterlik metni ve dijital metin durumu terminalde listelenir.
-
-### Adım 2: Sözcük Sınırlarıyla Parçalama (Chunking)
-```bash
-.venv/bin/python -m src.chunking.text_chunker sample_docs/workbench_demo.pdf --boundary word --inspect
-```
-*Beklenen Çıktı:* Kelimeleri bölmeden üretilen 2 adet parça (`Chunk 1` ve `Chunk 2`), sayfa numaraları ve tam metin sınırlarıyla görüntülenir.
-
-### Adım 3: BM25 ile Kaynak Arama
-```bash
-.venv/bin/python -m src.retrieval.search_pdf sample_docs/workbench_demo.pdf "source passages" --boundary word
-```
-*Beklenen Çıktı:* Sayfa 2'de 1 eşleşme (Skor: 4.0310), alıntı metni ve `answer_eligible: False` güvenlik uyarısı listelenir.
-
-### Adım 4: Eşleşmeyen Sorgu (Negatif Kontrol)
-```bash
-.venv/bin/python -m src.retrieval.search_pdf sample_docs/workbench_demo.pdf "quasar"
-```
-*Beklenen Çıktı:* Eşleşen kaynak bulunamadığı açıkça bildirilir (`No matching source found...`); varsayımsal içerik üretilmez.
-
-### Adım 5: Python API ile Kaynak Bağlamı ve BBox İnceleme
-```bash
-.venv/bin/python -c "from src.workbench import open_upload; doc = open_upload('workbench_demo.pdf', open('sample_docs/workbench_demo.pdf', 'rb').read()); res = doc.search('source passages')[0]; print('BBox:', res['source_context']['bbox']); print('Association:', res['source_context']['association'])"
-```
-*Beklenen Çıktı:* BBox `[0.0, 52.68, 595.0, 141.99]` ve `Association: not_inferred` değerleri görüntülenir.
-
-### Adım 6: Yerel Çalışma Masası Arayüzünü Başlatma
-```bash
-.venv/bin/python -m streamlit run apps/workbench.py --server.address 127.0.0.1 --server.port 8501 --server.maxUploadSize 20 --browser.gatherUsageStats false --client.toolbarMode minimal
-```
-*Beklenen Çıktı:* Tarayıcınızda `http://127.0.0.1:8501` adresinde çalışan, internet veya API anahtarı gerektirmeyen yerel arayüz açılır.
-
----
-
-## 5. Mevcut Yetenek Sınırları ve Yol Haritası
+- **Kullanıcı kaynak onayı:** Cevap paneli seçili belirsiz sıradan kaynağın
+  tam metnini ve özgün kırpımını gösterir. Kullanıcı iki ayrı onaydan birini
+  seçer: **Tam pasajı kaynak olarak kullan** tek span/sarılmış paragraf için
+  etiket uydurmadan kaynak kullanımını onaylar; **Etiket–değer ilişkisi**
+  mevcut native parçalar arasından iki ayrı seçim ve açık ilişki onayı ister.
+  `user_confirmation.kind` sırasıyla `passage` veya `relation` olur. Pasaj
+  onayı bir alan ilişkisini doğrulamaz. Her ikisi belge SHA’sı, soru özeti ve
+  seçili ham kanıt parmak izine bağlı kullanıcı beyanıdır; `not_inferred`,
+  span/kutular ve formül güveni değişmez. Onaylı kaynak tam kesit alıntısı
+  gerektirir. Seçim/soru/belge/onay türü veya ilişki seçimi değişikliği onayı
+  ve cevabı geçersizleştirir. Onay çağrı yapmaz; üretim ve bulut onayı ayrıdır.
 
 - **Formül Doğrulaması:** Matematiksel semboller ve eksi işaretleri taranmış veya dijital PDF'lerde kolayca bozulabilir. OCR adayları henüz kesin doğruluk garantisi vermediği için matematik cevapları daima doğrulanmamış (`answer_eligible=false`) kabul edilir.
 - **Model Destekli Üretim (LLM):** İsteğe bağlı cevap yolunun kurulumu, sağlayıcıları ve güven sınırları için [cevap üretimi kılavuzuna](grounded-answers.md) bakın.

@@ -125,37 +125,34 @@ Yanıt gövdesi en çok 64 KiB; üretim çıktısı en çok 1500 token istenir.
   Genel tablo/semantik form çözümleyici yoktur.
 - Üretime uygun kaynaklar varsayılan seçilir. Her uygun olmayan BM25 eşleşmesi
   kimliği, sayfası ve engel gerekçesiyle görünür; kaynak kartı/kırpımı silinmez.
-  Belirsiz kaynağı tekrar seçmek ayrıca kullanıcı ilişki onayı gerektirir;
-  matematik kaynağını seçmek üretimi durdurur. Böylece
-  ilgisiz belirsiz bir hit açık bir alanın kullanımını tek başına engellemez.
-  Gönderilecek JSON yalnızca seçili tam kesitleri içerir; önizleme ve istek
-  aynı kalır. Aynı satırdaki bitişik font span’leri tek metin akışı olarak
-  değerlendirilir; font değişikliği tek başına üretimi engellemez. Ayrık
-  sütunlar ve aynı sütundaki tamamlanmamış parçalar onay gerektirir;
-  değerin sözcük sayısı, sonundaki nokta, geniş boşluk veya etiketle aynı
-  native blokta olması bunu değiştirmez. Satırlara bölünmüş paragraflar da
-  bu muhafazakâr kontrolde onay gerektirebilir; aşağıdaki akışı kullanın.
-  Her satırı tamamlanmış çok satırlı cümle blokları ayrı sayfa başlıkları
-  nedeniyle engellenmez.
-  Kesitte iki noktalı belirsiz alan varsa üretim yine engellenir. İki noktasız,
-  alt alta metinden alan ilişkisi çıkarılmaz. Bu muhafazakâr yapı kontrolü
-  anlamsal çözümleme değildir.
-- Belirsiz sıradan metni kullanmak için **Gönderilecek kaynaklar** içinden ilgili
-  kaynağı seçin. Panel tam metni ve özgün kırpımı tekrar gösterir. Kaynaktaki
-  native metin parçalarından etiketi ve ona ait değeri ayrı ayrı seçip
-  **Gösterilen etiket–değer ilişkisini onaylıyorum** düğmesine basın. İki seçim de
-  başlangıçta boştur; yeni metin/değer yazılmaz, komşu değer otomatik atanmaz.
-  Tek parça metin etiket/değeri ayrı seçmeye izin vermiyorsa farklı kaynakla arayın;
-  bu panel genel form düzenleyicisi değildir. Kırpım gösterilemezse onay verilmez.
-  Onay, yalnızca bu belge SHA’sı, soru ve seçili kaynakların tam içeriği/konumları
-  için kullanıcı beyanıdır. `user_confirmation` ayrı kayıttır;
-  `association=not_inferred`, özgün span/kutular ve `answer_eligible=false` korunur.
-  İlişkiyi **kullanıcı onayladı; uygulama doğrulamadı**. Onaylı kaynağın cevap
-  alıntısı etiketi ve değeri içeren **tam kesit metni** olmalıdır; yalnız etiket
-  veya yalnız değer alıntısı reddedilir. Kaynak/seçim/soru/belge değişirse onay ve
-  eski cevap silinir. Etiket/değer seçimini değiştirmek yeniden onay gerektirir.
-  Onay düğmesi veya yeniden çizim HTTP çağrısı yapmaz; ayrıca **Cevap üret** ve
-  Gemini için belge gönderim onayı gerekir. Formül engeli bu onayla aşılamaz.
+  `not_inferred` kaynak seçmek ayrıca kullanıcı onayı gerektirir;
+  matematik kaynağını seçmek üretimi durdurur. Böylece ilgisiz belirsiz bir
+  hit açık bir alanın kullanımını tek başına engellemez. Gönderilecek JSON
+  yalnızca seçili tam kesitleri içerir; önizleme ve istek aynı kalır.
+  Noktalama, sözcük sayısı, boşluk, girinti veya native blok üyeliği otomatik
+  kabul sağlamaz. İki noktasız alt alta metinden alan ilişkisi çıkarılmaz.
+- Sıradan metni kullanmak için **Gönderilecek kaynaklar** içinden ilgili
+  kaynağı seçin. Panel tam metni ve özgün kırpımı tekrar gösterir.
+  **Onay türü** iki ayrı seçenek sunar:
+  - **Tam pasajı kaynak olarak kullan:** **Gösterilen tam pasajı kaynak olarak
+    onaylıyorum** düğmesiyle bu soru için tam kesitin kaynak kullanımını
+    onaylayın. Tek span, sarılmış paragraf ve karışık font metni için etiket
+    veya değer seçimi gerekmez. `user_confirmation.kind=passage` alan ilişkisi
+    onaylamaz; model belirsiz etiket–değer eşleştirmesi çıkaramaz.
+  - **Etiket–değer ilişkisi:** Native parçalardan etiketi ve ona ait değeri
+    ayrı seçip **Gösterilen etiket–değer ilişkisini onaylıyorum** düğmesine
+    basın. Seçimler başlangıçta boştur; yeni metin yazılmaz, komşu değer
+    otomatik atanmaz. `user_confirmation.kind=relation` ayrı ilişki beyanıdır.
+
+  Kırpım gösterilemezse iki onay da kullanılamaz. Her onay yalnızca bu belge
+  SHA’sı, soru ve seçili kaynakların tam içeriği/konumları için kullanıcı
+  beyanıdır; uygulama doğrulaması değildir. `association=not_inferred`, özgün
+  span/kutular ve `answer_eligible=false` korunur. İki onay türü de cevapta
+  **tam kesit metni** alıntısı gerektirir; kısmi veya uydurma alıntı reddedilir.
+  Kaynak/seçim/soru/belge veya onay türü değişirse onay ve eski cevap silinir.
+  Etiket/değer seçimini değiştirmek yeniden ilişki onayı gerektirir.
+  Onay veya yeniden çizim HTTP çağrısı yapmaz; ayrıca **Cevap üret** ve Gemini
+  için belge gönderim onayı gerekir. Formül engeli iki onayla da aşılamaz.
 - Formül adayları/grupları veya seçili kesitte matematik gösterimi varsa üretim
   yapılmaz. Metin eşleşmesi tam kaynak bandına genişletilirken bantla örtüşen
   mevcut formüller ve onları içeren gruplar güven bayraklarıyla birlikte korunur;

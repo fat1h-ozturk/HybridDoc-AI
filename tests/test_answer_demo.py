@@ -31,6 +31,9 @@ def test_simulated_prose_explicit_field_and_missing_fact(text, question, reply, 
     document = open_upload('invented-demo.pdf', invented_pdf(text))
     evidence, omitted = answers.build_evidence(document.search(question))
     assert evidence and not omitted
+    if evidence[0]['association'] == 'not_inferred':
+        assert answers.evidence_issue(evidence)
+        evidence[0]['user_confirmation'] = answers.confirm_source_passage(evidence, evidence[0]['id'], question)
     def fake(request):
         sent = json.loads(json.loads(request.content)['contents'][0]['parts'][0]['text'])
         assert sent['question'] == question
