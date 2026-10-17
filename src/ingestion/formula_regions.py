@@ -75,6 +75,21 @@ def _merge_regions(regions, spans):
                 break
 
 
+def native_table_cells(page):
+    cells = []
+    table_error = None
+    try:
+        for ti, table in enumerate(page.find_tables().tables):
+            for row, rr in enumerate(table.rows):
+                for col, box in enumerate(rr.cells):
+                    if box:
+                        cells.append({'bbox': pymupdf.Rect(box), 'table': ti,
+                                      'row': row, 'column': col})
+    except Exception as exc:
+        table_error = f'table detection failed: {exc}'
+    return cells, table_error
+
+
 def propose_regions(page):
     """Return candidate boxes, native span inventory and table cell metadata.
 
@@ -98,17 +113,7 @@ def propose_regions(page):
                                   or bool(span['flags'] & 1),
                                   'block_idx': b_idx, 'line_idx': l_idx,
                                   'line_bbox': line_bbox, 'block_bbox': block_bbox})
-    cells = []
-    table_error = None
-    try:
-        for ti, table in enumerate(page.find_tables().tables):
-            for row, rr in enumerate(table.rows):
-                for col, box in enumerate(rr.cells):
-                    if box:
-                        cells.append({'bbox': pymupdf.Rect(box), 'table': ti,
-                                      'row': row, 'column': col})
-    except Exception as exc:
-        table_error = f'table detection failed: {exc}'
+    cells, table_error = native_table_cells(page)
     for s in spans:
         s['cell'] = next((c for c in cells if c['bbox'].contains(
             pymupdf.Point((s['bbox'].x0+s['bbox'].x1)/2,

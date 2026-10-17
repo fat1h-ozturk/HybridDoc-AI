@@ -10,6 +10,7 @@ from src.chunking.text_chunker import chunk_pages, chunk_formula_pages, format_c
 from src.evaluation.review_formulas import generate_formula_review_html
 from src.ingestion.pdf_loader import load_pdf, load_pdf_formulas
 from src.retrieval.search_pdf import BM25Searcher, tokenize
+from src.field_evidence import explicit_fields, relation_for_hit
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 MAX_PAGES = 200
@@ -28,8 +29,9 @@ class WorkbenchDocument:
         if not tokenize(question):
             raise ValueError("Soruya en az bir sözcük yazın.")
         results = BM25Searcher(self.search_chunks).search(question, top_k=5)
-        # Expand source evidence, never infer a field value from extraction order.
+        # Expand source evidence; explicit colon relations require native geometry.
         with pymupdf.open(stream=self.pdf_bytes, filetype="pdf") as pdf:
+            fields = explicit_fields(pdf)
             for result in results:
                 chunk = self.search_chunks[result['source_order'] - 1]
                 block = chunk['blocks'][0]
@@ -45,11 +47,27 @@ class WorkbenchDocument:
                 result['source_context'] = {
                     'text': page.get_text('text', clip=band, sort=True).strip(),
                     'bbox': list(band),
+                    'spans': [{'text': span['text'], 'bbox': list(span['bbox'])}
+                              for block in page.get_text('dict', clip=band, sort=True)['blocks']
+                              for line in block.get('lines', []) for span in line['spans']],
                     'association': 'not_inferred',
                     'note': ('Bu kesit çevredeki satır ve sütunları gösterir; etiket–değer '
                              'ilişkisi otomatik seçilmez. Değer boş veya ilişki belirsizse '
                              'bu kaynaktan kesin cevap çıkarılamaz. Kırpımı inceleyin.'),
                 }
+                formula_page = self.formula_pages[page.number]
+                result['formulas'] = [f for f in formula_page['formulas']
+                                      if pymupdf.Rect(f['bbox']).intersects(band)]
+                formula_ids = {f['id'] for f in result['formulas']}
+                result['formula_groups'] = [g for g in formula_page.get('formula_groups', [])
+                                            if formula_ids.intersection(g['formula_ids'])]
+                context = result['source_context']
+                relation = relation_for_hit(fields.get(page.number, []), hit, context['text'])
+                if relation:
+                    context.update(association='explicit_same_row', field_relation=relation,
+                                   note=('Native metinde tek satırda açık etiket: değer ilişkisi bulundu. '
+                                         'Bu bir çıkarım ilişkisi; anlamsal doğruluk veya kimlik doğrulaması değildir. '
+                                         'Özgün kesiti ve alıntıyı inceleyin.'))
         return results
 
     def source_crop(self, result: dict) -> bytes:

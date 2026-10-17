@@ -37,8 +37,8 @@ mevcut CLI komutları aynı şekilde çalışır.
    Metin eşleşmelerinde etiketin çevresindeki aynı sayfa kesiti, konuma göre
    sıralanmış native metin ve kaynak görüntüsüyle gösterilir. Böylece ayrı PDF
    metin parçalarında duran form etiketleri ve yakındaki değerler birlikte
-   incelenebilir. Kesit komşu satır/sütunları da içerir; bir etikete otomatik
-   değer atanmaz. Boş veya belirsiz alanlarda kesin cevap çıkarılamaz.
+   incelenebilir. Kesit komşu satır/sütunları da içerir; alan ilişkileri ve
+   belirsiz kaynakların kullanıcı onayı için [kanıt ve alıntı sınırlarını](docs/grounded-answers.md#kanıt-alıntı-ve-sınırlar) izleyin.
 4. Tam sonuçları, tüm native sayfaları ve tüm parçaları **UTF-8** indirin.
    **Formül inceleme** sekmesinde raporu açın; kaynak kırpımları ve çözülemeyen
    formül uyarıları mevcut HTML exporter ile gösterilir. HTML'i indirip daha

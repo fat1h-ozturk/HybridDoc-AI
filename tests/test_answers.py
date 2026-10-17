@@ -13,6 +13,22 @@ def source(text='Ankara is the capital of Turkey.', **extra):
                 detection_status='native_heuristic_incomplete', **extra)
 
 
+def confirmed_evidence(question='capital?'):
+    evidence, _ = answers.build_evidence([source()])
+    evidence[0]['user_confirmation'] = answers.confirm_source_passage(evidence, evidence[0]['id'], question)
+    return evidence
+
+
+@pytest.mark.parametrize('context', [None, {'text': 'Deniz Örnek.', 'prose_run': 'Deniz Örnek.'}])
+def test_punctuation_and_prose_metadata_cannot_admit_unconfirmed_evidence(context):
+    evidence, _ = answers.build_evidence([source('Deniz Örnek.', source_context=context)])
+    assert evidence[0]['requires_source_review']
+    evidence[0]['requires_source_review'] = False
+    with pytest.raises(answers.AnswerError, match='association=not_inferred'):
+        answers.generate_answer('Gemini API', 'simulated', 'Baba Adı Deniz', evidence, consent=True,
+                                transport=httpx.MockTransport(lambda r: pytest.fail('unconfirmed source sent HTTP')))
+
+
 def response_for(evidence, answer='Turkey has its capital in Ankara.'):
     return dict(status='answered', answer=answer,
                 citations=[dict(source_id=evidence[0]['id'], quote=evidence[0]['text'])])
@@ -35,7 +51,7 @@ def test_evidence_preserves_complete_context_flags_and_stable_id():
 
 @pytest.mark.parametrize('mutation', ['unknown', 'quote', 'empty', 'uncited', 'oversize', 'status'])
 def test_rejects_invalid_or_unsupported_output(mutation):
-    evidence, _ = answers.build_evidence([source()])
+    evidence = confirmed_evidence()
     data = response_for(evidence)
     if mutation == 'unknown':
         data['citations'][0]['source_id'] = 'invented'
@@ -54,7 +70,7 @@ def test_rejects_invalid_or_unsupported_output(mutation):
 
 
 def test_citation_validation_does_not_claim_semantic_truth():
-    evidence, _ = answers.build_evidence([source()])
+    evidence = confirmed_evidence()
     result = answers.validate_answer(json.dumps(response_for(evidence)), evidence)
     assert result['answer'] == 'Turkey has its capital in Ankara.'
     assert result['citations'][0]['quote'] == 'Ankara is the capital of Turkey.'
@@ -84,7 +100,7 @@ def test_live_inventory_shape_uses_fixed_loopback_only():
 def test_provider_payload_matches_preview_and_has_no_tools_or_secret_url(provider, monkeypatch):
     monkeypatch.setenv('GEMINI_API_KEY', 'test-secret')
     monkeypatch.setenv('HYBRIDDOC_GEMINI_MODELS', 'gemini-test')
-    evidence, _ = answers.build_evidence([source()])
+    evidence = confirmed_evidence('Where is the capital?')
     preview = answers.request_preview('Where is the capital?', evidence)
     requests = []
     def handle(request):
@@ -118,7 +134,7 @@ def test_provider_payload_matches_preview_and_has_no_tools_or_secret_url(provide
 def test_guards_prevent_any_provider_call(kind, monkeypatch):
     monkeypatch.setenv('GEMINI_API_KEY', 'test-secret')
     monkeypatch.setenv('HYBRIDDOC_GEMINI_MODELS', 'gemini-test')
-    evidence, _ = answers.build_evidence([source()])
+    evidence = confirmed_evidence()
     consent, model, question = True, 'gemini-test', 'capital?'
     if kind == 'none':
         evidence = []
@@ -134,6 +150,7 @@ def test_guards_prevent_any_provider_call(kind, monkeypatch):
         evidence, _ = answers.build_evidence([source('Father', source_context={'text': 'Father\nMother\nInvented Person\nOther Person', 'association': 'not_inferred'})])
     else:
         question = 'x' * 3000
+        evidence = confirmed_evidence(question)
     def forbidden(request):
         pytest.fail('guard must run before HTTP')
     with pytest.raises(answers.AnswerError):
@@ -145,7 +162,7 @@ def test_guards_prevent_any_provider_call(kind, monkeypatch):
 def test_safe_http_errors_never_echo_raw_body_or_credentials(code, monkeypatch):
     monkeypatch.setenv('GEMINI_API_KEY', 'test-secret')
     monkeypatch.setenv('HYBRIDDOC_GEMINI_MODELS', 'gemini-test')
-    evidence, _ = answers.build_evidence([source()])
+    evidence = confirmed_evidence()
     def handle(request):
         return httpx.Response(code, text='test-secret private text')
     with pytest.raises(answers.AnswerError) as error:
@@ -161,7 +178,7 @@ def test_safe_http_errors_never_echo_raw_body_or_credentials(code, monkeypatch):
 def test_refusal_malformed_and_incomplete_responses_are_rejected(payload, monkeypatch):
     monkeypatch.setenv('GEMINI_API_KEY', 'test-secret')
     monkeypatch.setenv('HYBRIDDOC_GEMINI_MODELS', 'gemini-test')
-    evidence, _ = answers.build_evidence([source()])
+    evidence = confirmed_evidence()
     with pytest.raises(answers.AnswerError):
         answers.generate_answer('Gemini API', 'gemini-test', 'capital?', evidence, consent=True,
                                 transport=httpx.MockTransport(lambda r: httpx.Response(200, json=payload)))
@@ -173,6 +190,8 @@ def test_prose_on_unresolved_formula_page_can_be_cited_but_formula_band_cannot()
                                    'association': 'not_inferred'})
     prose['math_status'] = 'unresolved'
     evidence, _ = answers.build_evidence([prose])
+    assert answers.evidence_issue(evidence)
+    evidence[0]['user_confirmation'] = answers.confirm_source_passage(evidence, evidence[0]['id'], 'source passages')
     assert answers.evidence_issue(evidence) is None
     prose['source_context']['text'] += '\nx = y - 2'
     evidence, _ = answers.build_evidence([prose])
@@ -189,7 +208,7 @@ def test_inventory_filters_remote_and_cloud_aliases_before_selection():
 
 @pytest.mark.parametrize('info', [{'remote_model': 'upstream'}, {'remote_host': 'https://ollama.com'}, {}, {'model_info': {}}])
 def test_ollama_checks_model_is_local_without_sending_question_first(info):
-    evidence, _ = answers.build_evidence([source()])
+    evidence = confirmed_evidence()
     def handle(request):
         assert str(request.url) == 'http://127.0.0.1:11434/api/show'
         assert json.loads(request.content) == {'model': 'tiny:latest'}
@@ -204,7 +223,7 @@ def test_ollama_checks_model_is_local_without_sending_question_first(info):
 def test_nested_malformed_response_is_safe(payload, monkeypatch):
     monkeypatch.setenv('GEMINI_API_KEY', 'test-secret')
     monkeypatch.setenv('HYBRIDDOC_GEMINI_MODELS', 'gemini-test')
-    evidence, _ = answers.build_evidence([source()])
+    evidence = confirmed_evidence()
     with pytest.raises(answers.AnswerError):
         answers.generate_answer('Gemini API', 'gemini-test', 'capital?', evidence, consent=True,
                                 transport=httpx.MockTransport(lambda r: httpx.Response(200, json=payload)))
@@ -214,7 +233,7 @@ def test_nested_malformed_response_is_safe(payload, monkeypatch):
 def test_transport_limits_and_errors(kind, monkeypatch):
     monkeypatch.setenv('GEMINI_API_KEY', 'test-secret')
     monkeypatch.setenv('HYBRIDDOC_GEMINI_MODELS', 'gemini-test')
-    evidence, _ = answers.build_evidence([source()])
+    evidence = confirmed_evidence()
     attempts = []
     def handle(request):
         attempts.append(request)
@@ -246,7 +265,7 @@ def test_context_preview_does_not_include_excerpt_outside_the_selected_source_cr
 
 
 def test_local_model_context_budget_prevents_silent_evidence_truncation():
-    evidence, _ = answers.build_evidence([source()])
+    evidence = confirmed_evidence()
     def handle(request):
         assert request.url.path == '/api/show', 'oversize input must not reach inference'
         return httpx.Response(200, json={'model_info': {'llama.context_length': 2048}})
