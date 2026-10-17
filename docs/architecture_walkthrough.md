@@ -74,17 +74,12 @@ flowchart TD
   ```
 - **Kesit metadatası:** Kaynak bandıyla örtüşen mevcut formül kayıtları ve bu
   formülleri içeren gruplar, güven bayrakları değiştirilmeden sonuçta korunur.
-  Noktalama, sözcük sayısı, konum veya native blok üyeliği sıradan metni
-  otomatik olarak üretime uygun yapmaz. `not_inferred` kanıt için kullanıcı
-  tam pasajın kaynak kullanımını ya da ayrı etiket–değer ilişkisini onaylar.
-  Tek span, sarılmış paragraf ve karışık font metni tam pasaj olarak
-  onaylanabilir; özgün span’ler ve tam kesit korunur.
 - **`source_crop()`:** İlgili koordinat bandını PyMuPDF ile piksel görüntüsüne (`pixmap`) dönüştürür.
 - **İlişkilendirme:** `src/field_evidence.py` yalnızca native yatay tek satırdaki
   açık `Etiket: Değer` ilişkisini `association: "explicit_same_row"` olarak kaydeder.
   `field_relation` özgün span’leri/kutuları ve tam etiket/değer alıntısını korur;
   kaynak SHA ve sayfa değişmez. Yinelenen etiket, boş değer, yarışan sütun veya
-  sarılmış etiket veya algılanan hücre sınırını aşan eşleşme gibi durumlar
+  sarılmış etiket ya da algılanan hücre sınırını aşan eşleşme gibi durumlar
   `not_inferred` kalır. Ayrı span’deki iki nokta da yinelenen etikete sayılır. Bu ilişki anlamsal doğruluk,
   kimlik veya formül güveni sağlamaz; `answer_eligible=false` korunur.
 
@@ -113,17 +108,11 @@ Ham PDF Akışı (PDF motorunun çizim sırası):
   kaydedilebilir; belirsiz düzenler `not_inferred` kalır. Cevap paneli uygun
   kaynakları varsayılan seçer, dışlanan her kaynağı gerekçesiyle görünür tutar.
   Alan alıntısı etiketi ve değeri birlikte kapsamak zorundadır.
-- **Kullanıcı kaynak onayı:** Cevap paneli seçili belirsiz sıradan kaynağın
-  tam metnini ve özgün kırpımını gösterir. Kullanıcı iki ayrı onaydan birini
-  seçer: **Tam pasajı kaynak olarak kullan** tek span/sarılmış paragraf için
-  etiket uydurmadan kaynak kullanımını onaylar; **Etiket–değer ilişkisi**
-  mevcut native parçalar arasından iki ayrı seçim ve açık ilişki onayı ister.
-  `user_confirmation.kind` sırasıyla `passage` veya `relation` olur. Pasaj
-  onayı bir alan ilişkisini doğrulamaz. Her ikisi belge SHA’sı, soru özeti ve
-  seçili ham kanıt parmak izine bağlı kullanıcı beyanıdır; `not_inferred`,
-  span/kutular ve formül güveni değişmez. Onaylı kaynak tam kesit alıntısı
-  gerektirir. Seçim/soru/belge/onay türü veya ilişki seçimi değişikliği onayı
-  ve cevabı geçersizleştirir. Onay çağrı yapmaz; üretim ve bulut onayı ayrıdır.
+- **Kullanıcı kaynak onayı:** `src/answers.py` seçili kanıtı denetler;
+  `src/answer_ui.py` tam pasaj kullanımı ile etiket–değer ilişkisi için ayrı
+  kullanıcı onayları sunar. Onay akışı, kapsamı, geçersizleşmesi ve alıntı
+  sözleşmesi [cevap üretimi kılavuzunda](grounded-answers.md#kanıt-alıntı-ve-sınırlar)
+  açıklanır.
 
 ### Sıralama Skoru (Ranking) vs. Cevap Doğruluğu (Correctness)
 - BM25 skoru (ör. `4.0310`), sorudaki terimlerin belgedeki sıklığını ve uzunluğunu ölçen leksikal bir sıralama metriğidir.

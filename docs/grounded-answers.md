@@ -2,7 +2,7 @@
 
 Arama ve kaynak inceleme varsayılan olarak model kullanmaz. Cevap üretimi
 isteğe bağlıdır: **Kaynakları ara → Cevap üretimini etkinleştir → sağlayıcı ve
-model seç → gönderilecek kaynakları/önizlemeyi incele → Cevap üret**.
+model seç → kaynakları seç, gerekirse kaynak onayı ver → önizlemeyi incele → Cevap üret**.
 Etkinleştirme sırasında varsayılan sağlayıcı **Ollama** olur. Sağlayıcı/model
 seçimi, sayfa seçimi, normal yeniden çizim veya arama cevap isteği göndermez.
 Buluta otomatik geçiş yoktur. Her yeni cevap için düğmeye tekrar basmak gerekir.
@@ -76,9 +76,9 @@ seçeneği kullanmadan önce bu aktarımı değerlendirin.
    Liste uygulamaya gömülü değildir; katalog değişirse ortam listesini güncelleyin.
    Liste boşsa otomatik veya eski bir model seçilmez. Uygulama anahtar/model
    erişimini otomatik sorgulamaz; `GEMINI_API_KEY` eksikse açık yönlendirme gösterir.
-Yapılandırılmış model/anahtar ve belge onayı bağlantı veya API yetkisi kanıtı
-  değildir. Arayüz kaynak uygunluğunu ayrıca denetler; gerçek erişim yalnızca
-  açık üretim isteğinde anlaşılır.
+   Yapılandırılmış model/anahtar ve belge onayı bağlantı veya API yetkisi kanıtı
+   değildir. Arayüz kaynak uygunluğunu ayrıca denetler; gerçek erişim yalnızca
+   açık üretim isteğinde anlaşılır.
 3. Ortam değişkenlerini alan terminalden README’deki Streamlit komutunu çalıştırın.
 4. Arayüzde **Gemini API**, katalogdaki model ve kaynakları seçin. Google
    gönderim açıklamasını okuyun; **bu belge için** onay kutusunu işaretleyin.
@@ -173,7 +173,7 @@ Yanıt gövdesi en çok 64 KiB; üretim çıktısı en çok 1500 token istenir.
 
 ```bash
 python -m pytest tests/test_answer_demo.py -q -s
-python -m pytest tests/test_answers.py tests/test_explicit_fields.py tests/test_workbench_ui.py -q
+python -m pytest tests/test_answers.py tests/test_explicit_fields.py tests/test_source_confirmation.py tests/test_workbench_ui.py -q
 python -m pytest -q
 ```
 
