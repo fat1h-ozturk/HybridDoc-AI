@@ -3,6 +3,10 @@
 Arama ve kaynak inceleme varsayılan olarak model kullanmaz. Cevap üretimi
 isteğe bağlıdır: **Kaynakları ara → Cevap üretimini etkinleştir → sağlayıcı ve
 model seç → kaynakları seç, gerekirse kaynak onayı ver → önizlemeyi incele → Cevap üret**.
+Arama yapıldığında cevap ve model denetimleri arama çubuğunun hemen altında görünür
+ve Türkçe adım kontrol listesi (**belge → kaynaklar → sağlayıcı/model kurulumu → kaynak onayı (yalnızca belirsiz kaynak varsa) → bulut onayı (yalnızca Gemini) → Cevap üret**) ile yönlendirilir.
+Model kontrolleri uzun kaynak kartlarının arkasında kaybolmaz; istek JSON'u varsayılan olarak
+daraltılmış açılır alanda tutulur. Düğme devre dışı olduğunda somut engel gerekçesi ve sonraki desteklenen adım düğme yanında bildirilir.
 Etkinleştirme sırasında varsayılan sağlayıcı **Ollama** olur. Sağlayıcı/model
 seçimi, sayfa seçimi, normal yeniden çizim veya arama cevap isteği göndermez.
 Buluta otomatik geçiş yoktur. Her yeni cevap için düğmeye tekrar basmak gerekir.
@@ -56,12 +60,14 @@ seçeneği kullanmadan önce bu aktarımı değerlendirin.
 
 1. Gemini API erişimi olan kendi Google projenizi ve anahtarınızı yerelde
    yapılandırın. **AGY aboneliği API erişimi/kotası kanıtı değildir.** Anahtarı
-   sohbete, Git’e veya komut satırı argümanına yapıştırmayın. Örneğin Bash’te
+   sohbete, Git’e veya komut satırı argümanına yapıştırmayın. Güvenlik gereği
+   anahtar web arayüzüne yazılmaz ve kaydedilmez. Örneğin Zsh veya Bash'te
    anahtarı ekrana ve geçmişe yazmadan ortam değişkenine almak için:
 
-   ```bash
-   read -r -s -p 'Gemini API anahtarı (yerel): ' GEMINI_API_KEY
-   export GEMINI_API_KEY
+   ```zsh
+   read -s "GEMINI_API_KEY?Gemini API anahtarı (yerel): " && export GEMINI_API_KEY
+   # veya:
+   export GEMINI_API_KEY="AIzaSy..."
    ```
 
 2. [Güncel resmi model kataloğundan](https://ai.google.dev/gemini-api/docs/models)

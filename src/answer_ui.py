@@ -8,12 +8,76 @@ from src.answers import (AnswerError, SYSTEM_PROMPT, build_evidence, evidence_is
                          gemini_models, generate_answer, ollama_models, relation_choices, request_preview)
 
 
+def _format_step_checklist(
+    *,
+    document_name: str | None,
+    results_count: int,
+    generation_enabled: bool,
+    provider: str | None = None,
+    model: str | None = None,
+    configured: bool = False,
+    needs_confirmation: bool = False,
+    confirmation_done: bool = False,
+    consent: bool = False,
+    can_generate: bool = False,
+) -> str:
+    lines = ["**Adım Akışı / Kontrol Listesi:**"]
+    lines.append(f"1. **Belge:** ✓ Hazır ({document_name or 'Belge yüklendi'})")
+    if results_count > 0:
+        lines.append(f"2. **Kaynaklar:** ✓ {results_count} kaynak bulundu (Yerel BM25 metin araması)")
+    else:
+        lines.append("2. **Kaynaklar:** ○ Eşleşen kaynak bulunamadı (Farklı sözcüklerle arayın)")
+
+    if not generation_enabled:
+        lines.append("3. **Sağlayıcı / model kurulumu:** ○ Kapalı (İsteğe bağlı model cevabı için 'Cevap üretimini etkinleştir' kutusunu işaretleyin)")
+    else:
+        if provider == "Ollama":
+            if model:
+                lines.append(f"3. **Sağlayıcı / model kurulumu:** ✓ Ollama yerel model hazır ({model})")
+            else:
+                lines.append("3. **Sağlayıcı / model kurulumu:** ○ Yerel model seçilmedi ('Yerel model listesini oku / yenile' düğmesini kullanın)")
+        else:
+            if configured:
+                lines.append(f"3. **Sağlayıcı / model kurulumu:** ✓ Ortam hazır ({model}) — API bağlantısı/yetki otomatik sınanmaz")
+            else:
+                lines.append("3. **Sağlayıcı / model kurulumu:** ○ Ortam yapılandırması eksik (GEMINI_API_KEY veya HYBRIDDOC_GEMINI_MODELS)")
+
+    step_num = 4
+    if needs_confirmation:
+        if confirmation_done:
+            lines.append(f"{step_num}. **Kaynak onayı:** ✓ Kullanıcı onayı tamamlandı")
+        else:
+            lines.append(f"{step_num}. **Kaynak onayı:** ○ Onay bekleniyor (Aşağıdaki kaynak onayı formunu doldurun)")
+        step_num += 1
+
+    if generation_enabled and provider == "Gemini API":
+        if consent:
+            lines.append(f"{step_num}. **Bulut veri onayı:** ✓ Google aktarım onayı verildi")
+        else:
+            lines.append(f"{step_num}. **Bulut veri onayı:** ○ Google aktarım onayı bekleniyor (Onay kutusunu işaretleyin)")
+        step_num += 1
+
+    if can_generate:
+        lines.append(f"{step_num}. **Cevap üret:** ✓ Hazır ('Cevap üret' düğmesine basın)")
+    else:
+        lines.append(f"{step_num}. **Cevap üret:** ○ Bekleniyor (Eksik adımları tamamlayın)")
+
+    return "\n".join(lines)
+
+
 def render_answer_panel(results: list, question: str, document=None):
     st.subheader('Kaynaklara dayalı cevap — isteğe bağlı')
+    doc_name = document.file_name if document is not None else None
     if not st.checkbox('Cevap üretimini etkinleştir', key='generation_enabled'):
         st.session_state.pop('generated_answer', None)
         st.session_state.pop('source_confirmations', None)
+        st.markdown(_format_step_checklist(
+            document_name=doc_name,
+            results_count=len(results),
+            generation_enabled=False,
+        ))
         return
+
     provider = st.selectbox('Sağlayıcı', ['Ollama', 'Gemini API'], key='answer_provider')
     evidence, omitted = build_evidence(results)
     if omitted:
@@ -84,14 +148,18 @@ def render_answer_panel(results: list, question: str, document=None):
             item['user_confirmation'] = records[sid]
             st.caption(('Bu ilişkiyi kullanıcı onayladı' if kind == 'relation' else 'Bu tam pasajı kullanıcı onayladı')
                        + '; uygulama doğrulamadı. association=not_inferred korunur.')
+
     st.caption('Önizleme: yalnızca aşağıdaki soru ve seçili kaynak JSON’u gönderilir. '
                'PDF dosyası, görseller, API anahtarı ve diğer sayfalar bu içeriğe eklenmez. '
                'En çok 5 kaynak, kaynak başına 4000 karakter; toplam kanıt 16000 karakter.')
     preview = request_preview(question, evidence)
-    st.text(preview)
-    with st.expander('Sabit model talimatı'):
+    with st.expander('İstek gövdesi önizlemesi (gönderilecek tam JSON)', expanded=False):
+        st.text(preview)
+    with st.expander('Sabit model talimatı', expanded=False):
         st.text(SYSTEM_PROMPT)
+
     model, configured, consent = None, False, False
+    models = []
     if provider == 'Ollama':
         st.caption('Sabit yerel adres: http://127.0.0.1:11434. Model indirme/servis başlatma yapılmaz. '
                    'Yerel envanter düğmesi yalnızca model adlarını okur; belge göndermez. '
@@ -114,6 +182,20 @@ def render_answer_panel(results: list, question: str, document=None):
             st.info('Yerel envanteri okuyun. Uygun yerel model listesi boş olabilir veya yalnızca cloud '
                     'modelleri bulunabilir; erişim hatası modelin bulunmadığını kanıtlamaz. '
                     'Kurulum için Türkçe kılavuza bakın.')
+        with st.expander('Ollama yerel servis kurulum rehberi', expanded=not configured):
+            st.markdown(
+                "**Yerel Ollama Kurulumu (Terminal):**\n\n"
+                "Ollama bu makinede (`http://127.0.0.1:11434`) çalışmalıdır. Uygulama otomatik servis başlatmaz veya model indirmez.\n\n"
+                "```zsh\n"
+                "# Ollama servisini başlatın:\n"
+                "ollama serve\n\n"
+                "# Mevcut modelleri listeleyin:\n"
+                "ollama list\n\n"
+                "# Gerekirse yerel model indirin:\n"
+                "ollama pull llama3.2:3b\n"
+                "```\n"
+                "Servis çalıştıktan sonra yukarıdaki **'Yerel model listesini oku / yenile'** düğmesine basın."
+            )
     else:
         st.warning('Gemini API seçilirse soru ve önizlemede gösterilen seçili kaynak alıntıları '
                    'Google’a gönderilir. Ücret/kota ve Google veri koşulları geçerlidir. '
@@ -134,19 +216,105 @@ def render_answer_panel(results: list, question: str, document=None):
         if not os.getenv('GEMINI_API_KEY', '').strip():
             st.info('GEMINI_API_KEY eksik. Anahtarı yerel ortamda ayarlayın; sohbetten paylaşmayın. '
                     'AGY aboneliği API erişimi anlamına gelmez.')
+        with st.expander('Gemini API anahtarı ve ortam kurulum rehberi (yerel terminal)', expanded=not configured):
+            st.markdown(
+                "**Başlangıç Rehberi: Gemini API Kurulumu (Yerel Terminal)**\n\n"
+                "Güvenlik gereği API anahtarı web arayüzüne **yazılmaz** ve kaydedilmez. Anahtar yalnızca uygulamayı başlattığınız terminal oturumundaki ortam değişkenlerinden okunur.\n\n"
+                "**Zsh / Bash terminalinizde çalıştırın:**\n"
+                "```zsh\n"
+                "# 1. API anahtarını tanımlayın (geçmişe yazmadan güvenle girmek için):\n"
+                'read -s "GEMINI_API_KEY?Gemini API anahtarı (yerel): " && export GEMINI_API_KEY\n\n'
+                "# Veya doğrudan atayın:\n"
+                'export GEMINI_API_KEY="AIzaSy..."\n\n'
+                "# 2. Desteklenen Gemini model kataloğunu virgülle ayırarak tanımlayın:\n"
+                'export HYBRIDDOC_GEMINI_MODELS="gemini-2.5-flash,gemini-3.5-flash-lite,gemini-3.8-flash"\n\n'
+                "# 3. Ardından bu terminalde uygulamayı yeniden başlatın:\n"
+                "python -m streamlit run apps/workbench.py --server.address 127.0.0.1 --browser.gatherUsageStats false --client.toolbarMode minimal\n"
+                "```\n\n"
+                "> **Önemli Hatırlatma:** Ortam değişkenleri tanımlandığında arayüzde 'Yapılandırma hazır' görünür. "
+                "Ancak Google sunucusuna önceden bağlantı veya yetki testi yapılmaz (kota/yetki otomatik prob edilmez). "
+                "Gerçek API çağrısı yalnızca siz açıkça **Cevap üret** düğmesine bastığınızda ve onay verdiğinizde yapılır."
+            )
+
     if configured:
         st.caption('Yapılandırma hazır. Sağlayıcı bağlantısı, API yetkisi ve model erişimi henüz '
                    'doğrulanmış değildir; Cevap üret isteği sırasında denetlenir. Kaynak uygunluğu ayrı denetlenir.')
+
     scope = (provider, model, preview, consent)
     if scope != st.session_state.get('answer_scope'):
         st.session_state.pop('generated_answer', None)
         st.session_state.pop('answer_error', None)
         st.session_state['answer_scope'] = scope
+
     issue = evidence_issue(evidence, question=question)
     if issue:
         st.warning(issue)
-    if st.button('Cevap üret', key='generate_answer',
-                 disabled=bool(issue or not configured or (provider == 'Gemini API' and not consent))):
+
+    disabled_reasons = []
+    next_actions = []
+
+    if not configured:
+        if provider == 'Ollama':
+            disabled_reasons.append('Yerel model seçilmedi veya Ollama servisine erişilemedi.')
+            next_actions.append("'Yerel model listesini oku / yenile' düğmesine basın (servis çalışmıyorsa terminalde `ollama serve` başlatın).")
+        else:
+            if not os.getenv('GEMINI_API_KEY', '').strip():
+                disabled_reasons.append('GEMINI_API_KEY ortam değişkeni eksik.')
+                next_actions.append("Terminalde API anahtarını tanımlayın: `export GEMINI_API_KEY=\"...\"` (Aşağıdaki 'Gemini API anahtarı ve ortam kurulum rehberi' açılır alanına bakın).")
+            if not models:
+                disabled_reasons.append('HYBRIDDOC_GEMINI_MODELS ortam değişkeni eksik veya boş.')
+                next_actions.append('Terminalde model listesini tanımlayın: `export HYBRIDDOC_GEMINI_MODELS="gemini-2.5-flash"`')
+            elif not model:
+                disabled_reasons.append('Gemini modeli seçilmedi.')
+                next_actions.append('Yukarıdaki model açılır kutusundan bir model seçin.')
+
+    if provider == 'Gemini API' and not consent:
+        disabled_reasons.append('Bulut veri aktarımı onayı verilmedi.')
+        next_actions.append("'Bu belge için önizlemedeki soru ve kaynakların Google’a gönderilmesine onay veriyorum' kutusunu işaretleyin.")
+
+    if issue:
+        disabled_reasons.append(f'Kaynak kanıt engeli: {issue}')
+        needing_conf = [item for item in evidence if evidence_issue([item]) and not math_evidence_issue(item)]
+        if needing_conf:
+            next_actions.append("Yukarıdaki 'Kaynak onayı' bölümünden belirsiz kaynaklar için etiket–değer ilişkisini veya tam pasajı onaylayın ya da kaynağı seçimden çıkarın.")
+        elif any(math_evidence_issue(item) for item in evidence):
+            next_actions.append("Doğrulanmamış matematik/formül içeren kaynağı 'Gönderilecek kaynaklar' listesinden çıkarın; formülü kaynak kesitinden inceleyin.")
+        elif not evidence:
+            if any(evidence_issue([item]) and not math_evidence_issue(item) for item in by_id.values()):
+                next_actions.append("'Gönderilecek kaynaklar' listesinden kaynak seçin (belirsiz kaynaklar için yukarıdaki 'Kaynak onayı' adımı uygulanacaktır).")
+            else:
+                next_actions.append("'Gönderilecek kaynaklar' listesinden en az bir kaynak seçin.")
+        else:
+            next_actions.append("Soru sözcüklerini değiştirerek 'Kaynakları ara' yapın.")
+
+    is_disabled = bool(disabled_reasons)
+
+    needs_conf = any(evidence_issue([item]) and not math_evidence_issue(item) for item in evidence)
+    conf_done = bool(needs_conf and all(item['id'] in records for item in evidence if evidence_issue([item]) and not math_evidence_issue(item)))
+
+    st.markdown(_format_step_checklist(
+        document_name=doc_name,
+        results_count=len(results),
+        generation_enabled=True,
+        provider=provider,
+        model=model,
+        configured=configured,
+        needs_confirmation=needs_conf,
+        confirmation_done=conf_done,
+        consent=consent,
+        can_generate=not is_disabled,
+    ))
+
+    if is_disabled:
+        st.info(
+            "**Cevap üretimi şu an devre dışı:**\n"
+            + "\n".join(f"- **Neden:** {r}" for r in disabled_reasons)
+            + "\n\n"
+            + "**Sonraki desteklenen adım:**\n"
+            + "\n".join(f"- {a}" for a in next_actions)
+        )
+
+    if st.button('Cevap üret', key='generate_answer', disabled=is_disabled):
         st.session_state.pop('generated_answer', None)
         try:
             with st.spinner('Seçili sağlayıcıdan cevap bekleniyor…'):
