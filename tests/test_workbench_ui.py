@@ -582,3 +582,108 @@ def test_simulated_configured_prose_generates_only_on_click(monkeypatch, prose):
     assert json.loads(calls[0].content)['contents'][0]['parts'][0]['text'] == preview
     assert app.session_state['generated_answer']['status'] == 'answered'
     assert app.session_state['generated_answer']['citations'][0]['quote'] == json.loads(preview)['sources'][0]['text']
+
+
+def test_step_progression_and_guidance_near_search_flow():
+    app = AppTest.from_file(str(APP)).run()
+    app.radio[0].set_value('Demo PDF').run()
+    app.text_input(key='question').set_value('source passages')
+    app.button(key='search').click().run()
+
+    # Checklist is rendered with Turkish step progression
+    checklist = next((m.value for m in app.markdown if 'Adım Akışı / Kontrol Listesi' in m.value), None)
+    assert checklist is not None
+    assert '1. **Belge:** ✓ Hazır (workbench_demo.pdf)' in checklist
+    assert '2. **Kaynaklar:** ✓ 1 kaynak bulundu' in checklist
+    assert '3. **Sağlayıcı / model kurulumu:** ○ Kapalı' in checklist
+
+    # Answer panel appears near search flow, before the source cards subheader
+    headers = [s.value for s in app.subheader]
+    assert headers[0] == 'Kaynaklara dayalı cevap — isteğe bağlı'
+    assert headers[1] == 'Belgenin söylediği — kaynak pasajları'
+
+    # Enable generation and inspect collapsed JSON preview and setup guidance
+    app.checkbox(key='generation_enabled').check().run()
+    preview_exp = next((e for e in app.expander if 'İstek gövdesi önizlemesi' in e.label), None)
+    assert preview_exp is not None
+    assert preview_exp.proto.expanded is False
+
+    # Ollama guidance expander contains zsh command snippets
+    ollama_exp = next((e for e in app.expander if 'Ollama yerel servis kurulum rehberi' in e.label), None)
+    assert ollama_exp is not None
+    assert any('ollama serve' in m.value for m in ollama_exp.markdown)
+
+
+def test_disabled_generate_reasons_and_next_actions_displayed_near_button(monkeypatch):
+    import json
+    import httpx
+    from src import answers
+
+    monkeypatch.delenv('GEMINI_API_KEY', raising=False)
+    monkeypatch.delenv('HYBRIDDOC_GEMINI_MODELS', raising=False)
+
+    app = AppTest.from_file(str(APP)).run()
+    app.radio[0].set_value('Demo PDF').run()
+    app.text_input(key='question').set_value('source passages')
+    app.button(key='search').click().run()
+    app.checkbox(key='generation_enabled').check().run()
+    app.selectbox(key='answer_provider').select('Gemini API').run()
+
+    # Disabled reason and next supported action visible near button
+    assert app.button(key='generate_answer').disabled
+    disabled_info = next((i.value for i in app.info if 'Cevap üretimi şu an devre dışı' in i.value), None)
+    assert disabled_info is not None
+    assert 'GEMINI_API_KEY ortam değişkeni eksik' in disabled_info
+    assert 'Bulut veri aktarımı onayı verilmedi' in disabled_info
+    assert 'Sonraki desteklenen adım' in disabled_info
+    assert 'export GEMINI_API_KEY=' in disabled_info
+
+    # Setup guidance expander is present with zsh instructions
+    gemini_exp = next((e for e in app.expander if 'Gemini API anahtarı ve ortam kurulum rehberi' in e.label), None)
+    assert gemini_exp is not None
+    assert any('export GEMINI_API_KEY=' in m.value for m in gemini_exp.markdown)
+
+    # Now configure environment and consent, and select source requiring confirmation
+    monkeypatch.setenv('GEMINI_API_KEY', 'fake-key')
+    monkeypatch.setenv('HYBRIDDOC_GEMINI_MODELS', 'gemini-3.8-flash')
+    app.run()
+    app.checkbox(key='cloud_consent').check().run()
+    assert app.button(key='generate_answer').disabled
+
+    # Select the unverified source passage
+    sid = answers.build_evidence(app.session_state['results'])[0][0]['id']
+    app.multiselect(key='answer_sources').set_value([sid]).run()
+    assert app.button(key='generate_answer').disabled
+
+    # Disabled reason points specifically to source confirmation
+    disabled_info2 = next((i.value for i in app.info if 'Cevap üretimi şu an devre dışı' in i.value), None)
+    assert disabled_info2 is not None
+    assert 'Kaynak onayı' in disabled_info2
+
+    # Provide source passage confirmation
+    def handle(request):
+        reply = {'status': 'answered', 'answer': 'Doğrulandı.', 'citations': [{'source_id': sid, 'quote': 'text'}]}
+        return httpx.Response(200, json={'candidates': [{'finishReason': 'STOP', 'content': {'parts': [{'text': json.dumps(reply)}]}}]})
+    real_client = httpx.Client
+    monkeypatch.setattr(answers.httpx, 'Client', lambda **kw: real_client(**{**kw, 'transport': httpx.MockTransport(handle)}))
+
+    app.selectbox(key='confirmation_kind_' + sid).select('passage').run()
+    app.button(key='confirm_passage_' + sid).click().run()
+    assert not app.button(key='generate_answer').disabled
+
+
+def test_no_duplicate_controls_or_duplicate_keys():
+    app = AppTest.from_file(str(APP)).run()
+    app.radio[0].set_value('Demo PDF').run()
+    app.text_input(key='question').set_value('source passages')
+    app.button(key='search').click().run()
+    app.checkbox(key='generation_enabled').check().run()
+
+    # Verify no duplicate widget keys across all widgets
+    widget_keys = []
+    for widget_type in ('button', 'checkbox', 'selectbox', 'multiselect', 'text_input', 'radio', 'download_button'):
+        for elem in getattr(app, widget_type):
+            if hasattr(elem, 'key') and elem.key:
+                widget_keys.append(elem.key)
+    assert len(widget_keys) == len(set(widget_keys)), f"Duplicate widget keys detected: {widget_keys}"
+

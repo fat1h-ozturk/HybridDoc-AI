@@ -90,8 +90,11 @@ python -m pytest -q
 ## İsteğe bağlı cevap üretimi
 
 **Ollama (yerel varsayılan) ve Gemini API**, her biri içinde model seçimiyle
-kullanılabilir. Varsayılan kapalıdır; yalnızca **Cevap üret** düğmesi istek
-gönderir. Google için belgeye özel açık onay gerekir.
+kullanılabilir. Varsayılan kapalıdır; arama yapıldığında arama çubuğunun hemen altında
+güdümlü adım kontrol listesiyle (**belge → kaynaklar → model kurulumu → kaynak onayı → bulut onayı → Cevap üret**)
+yer alır. Model kontrolleri uzun kaynak kartlarının arkasında gizlenmez; istek JSON'u varsayılan olarak daraltılmış
+alanda tutulur. Düğme devre dışı olduğunda somut gerekçe ve sonraki adım açıkça gösterilir.
+Yalnızca **Cevap üret** düğmesi istek gönderir. Google için belgeye özel açık onay gerekir.
 [Türkçe kurulum, kaynak önizlemesi, sınırlar ve çevrimdışı simülasyon](docs/grounded-answers.md).
 
 ## 🎯 Proje Hedefleri ve Aşamalar

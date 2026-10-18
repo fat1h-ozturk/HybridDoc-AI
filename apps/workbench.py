@@ -87,6 +87,11 @@ if submitted:
         st.error(str(exc))
 
 if "results" in st.session_state:
+    if question == st.session_state["result_question"]:
+        render_answer_panel(st.session_state["results"], question, document)
+    else:
+        st.info('Soru değişti; eski cevap ve ilişki onayları kaldırıldı. Yeni soru için Kaynakları ara düğmesine basın.')
+
     results = st.session_state["results"]
     st.subheader("Belgenin söylediği — kaynak pasajları")
     st.caption("En çok 5 eşleşme. BM25 sırası güven, doğruluk veya olasılık değildir. "
@@ -166,12 +171,6 @@ if "results" in st.session_state:
     st.session_state["result_text"] = result_text
     st.download_button("Kaynak sonuçlarını indir (UTF-8)", result_text.encode("utf-8"),
                        file_name="sources.txt", mime="text/plain; charset=utf-8")
-
-if "results" in st.session_state:
-    if question == st.session_state["result_question"]:
-        render_answer_panel(st.session_state["results"], question, document)
-    else:
-        st.info('Soru değişti; eski cevap ve ilişki onayları kaldırıldı. Yeni soru için Kaynakları ara düğmesine basın.')
 
 native_tab, chunk_tab, formula_tab = st.tabs(["Tam sayfa metni", "Sözcük sınırı parçaları", "Formül inceleme"])
 with native_tab:
